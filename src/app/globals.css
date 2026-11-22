@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --color-brand-50: #fff1f1;
+  --color-brand-100: #ffe0e1;
+  --color-brand-200: #ffc7c9;
+  --color-brand-300: #ff9ea2;
+  --color-brand-400: #ff646b;
+  --color-brand-500: #ff2b34;
+  --color-brand-600: #f01c26;
+  --color-brand-700: #ca131c;
+  --color-brand-800: #a4131c;
+  --color-brand-900: #87151c;
+
+  --color-ink-50: #f6f6f6;
+  --color-ink-100: #e7e7e7;
+  --color-ink-200: #d1d1d1;
+  --color-ink-300: #b0b0b0;
+  --color-ink-400: #888888;
+  --color-ink-500: #6d6d6d;
+  --color-ink-600: #5d5d5d;
+  --color-ink-700: #4a4a4a;
+  --color-ink-800: #2e2e2e;
+  --color-ink-900: #1a1a1a;
+  --color-ink-950: #0a0a0a;
+
+  --color-status-todo: #f01c26;
+  --color-status-progress: #f5820b;
+  --color-status-review: #eab308;
+  --color-status-done: #16a34a;
+
+  --color-bg: #f6f6f7;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f6f6f7;
+  --color-border: #e6e6e6;
+  --color-text: #171717;
+  --color-text-muted: #6b6b6b;
+  --color-sidebar: #0a0a0a;
+  --color-sidebar-text: #ffffff;
+  --color-sidebar-muted: #a3a3a3;
+  --color-sidebar-border: #262626;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 8px rgba(0, 0, 0, 0.03);
+}
+
+.dark {
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-muted: #1a1a1a;
+  --color-border: #262626;
+  --color-text: #f2f2f2;
+  --color-text-muted: #9c9c9c;
+  --color-sidebar: #0a0a0a;
+  --color-sidebar-text: #ffffff;
+  --color-sidebar-muted: #a3a3a3;
+  --color-sidebar-border: #262626;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 8px rgba(0, 0, 0, 0.25);
+}
+
+@theme inline {
+  --color-brand-50: var(--color-brand-50);
+  --color-brand-100: var(--color-brand-100);
+  --color-brand-200: var(--color-brand-200);
+  --color-brand-300: var(--color-brand-300);
+  --color-brand-400: var(--color-brand-400);
+  --color-brand-500: var(--color-brand-500);
+  --color-brand-600: var(--color-brand-600);
+  --color-brand-700: var(--color-brand-700);
+  --color-brand-800: var(--color-brand-800);
+  --color-brand-900: var(--color-brand-900);
+
+  --color-ink-50: var(--color-ink-50);
+  --color-ink-100: var(--color-ink-100);
+  --color-ink-200: var(--color-ink-200);
+  --color-ink-300: var(--color-ink-300);
+  --color-ink-400: var(--color-ink-400);
+  --color-ink-500: var(--color-ink-500);
+  --color-ink-600: var(--color-ink-600);
+  --color-ink-700: var(--color-ink-700);
+  --color-ink-800: var(--color-ink-800);
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-950: var(--color-ink-950);
+
+  --color-status-todo: var(--color-status-todo);
+  --color-status-progress: var(--color-status-progress);
+  --color-status-review: var(--color-status-review);
+  --color-status-done: var(--color-status-done);
+
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-sidebar: var(--color-sidebar);
+  --color-sidebar-text: var(--color-sidebar-text);
+  --color-sidebar-muted: var(--color-sidebar-muted);
+  --color-sidebar-border: var(--color-sidebar-border);
+
+  --font-sans: var(--font-inter);
+
+  --shadow-card: var(--shadow-card);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Tailwind preflight sıfırlıyor (margin: 0), bu da <dialog>'un tarayıcı
+   tarafından otomatik ortalanmasını (margin: auto) bozuyor. Geri veriyoruz. */
+dialog {
+  margin: auto;
+}
+
+/* İçerik Paneli düz yazı editörü (TipTap) */
+.rich-content h1 { font-size: 1.5rem; font-weight: 800; margin: 0.75rem 0 0.4rem; }
+.rich-content h2 { font-size: 1.25rem; font-weight: 700; margin: 0.7rem 0 0.35rem; }
+.rich-content h3 { font-size: 1.05rem; font-weight: 700; margin: 0.6rem 0 0.3rem; }
+.rich-content p { margin: 0.4rem 0; line-height: 1.6; }
+.rich-content ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
+.rich-content ol { list-style: decimal; padding-left: 1.4rem; margin: 0.4rem 0; }
+.rich-content blockquote { border-left: 3px solid var(--color-border); padding-left: 0.8rem; color: var(--color-text-muted); margin: 0.5rem 0; }
+.rich-content a { color: #ff2424; text-decoration: underline; }
+.rich-content code { background: var(--color-surface-muted); border-radius: 4px; padding: 0 4px; }
+.rich-content:focus, .rich-content .ProseMirror:focus { outline: none; }
+
+.rich-content img { max-width: 100%; height: auto; border-radius: 8px; margin: 0.5rem 0; display: block; }
+.rich-content img.ProseMirror-selectednode { outline: 2px solid #ff2424; }
+
+/* Yazdırma / PDF: kenar çubuğu, üst çubuk ve düğmeler gizlenir; rapor sayfaya yayılır. */
+@media print {
+  aside, body > div header, nav, .no-print { display: none !important; }
+  body { background: #fff !important; }
+  main { overflow: visible !important; padding: 0 !important; }
+  .print-wrap { max-width: none !important; }
+}

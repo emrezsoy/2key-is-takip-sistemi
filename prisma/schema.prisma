@@ -1,0 +1,1002 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  EMPLOYEE
+  /// Müşteri paneli kullanıcısı (clientId ile bir müşteriye bağlı).
+  CLIENT
+}
+
+enum DurationUnit {
+  HOUR
+  DAY
+}
+
+enum Urgency {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  PENDING_APPROVAL
+  DONE
+}
+
+enum DayType {
+  NONE
+  HALF
+  FULL
+  LEAVE
+}
+
+enum PaymentType {
+  DAILY
+  MONTHLY
+}
+
+model User {
+  id             String    @id @default(cuid())
+  username       String    @unique
+  passwordHash   String
+  email          String    @unique
+  fullName       String
+  role           Role
+  employmentType String?
+  paymentType    PaymentType @default(DAILY)
+  dailyRate      Decimal?
+  monthlyRate    Decimal?
+  isActive       Boolean   @default(true)
+  emailNotificationsEnabled Boolean @default(true)
+  /// Paylaşım Takvimi yetkisi: yok / sadece kullanım (indir-kopyala) / kullanım + düzenleme. Admin her zaman EDIT.
+  shareCalendarAccess ShareCalendarAccess @default(NONE)
+  /// Reklam Paneli görüntüleme yetkisi. Admin her zaman erişir.
+  /// Teklifler sayfasını kullanır ve teklif / rapor hatırlatma bildirimlerini alır (adminler sayfayı zaten görür).
+  proposalAccess Boolean @default(false)
+  adPanelAccess  Boolean   @default(false)
+  /// Reklam yönetimi: kampanya kurma, kopyalama, düzenleme, yayına alma / durdurma (sorumlu olduğu müşterilerde). Admin her zaman.
+  adManageAccess Boolean   @default(false)
+  /// İçerik Paneli (müşteri içerikleri) düzenleme yetkisi. Admin her zaman erişir.
+  contentAccess  Boolean   @default(false)
+  /// Ana ekrandaki müşteri kutularının kişiye özel sırası (müşteri id'lerinin JSON dizisi).
+  clientOrder    String?
+  /// Müşteri hesabı: bağlı olduğu müşteri (role = CLIENT).
+  clientId       String?
+  clientAccount  Client?   @relation("ClientUsers", fields: [clientId], references: [id], onDelete: SetNull)
+  /// Geçici şifreyle açılan hesaplar ilk girişte kendi şifresini belirler.
+  mustChangePassword Boolean @default(false)
+  /// Müşteri panelindeki tanıtım turu tamamlandı/atlandı (boşsa ilk girişte otomatik başlar).
+  portalTourDoneAt DateTime?
+  avatarUrl      String?
+  isDeleted      Boolean   @default(false)
+  deletionReason String?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  supervisorId String?
+  supervisor   User?   @relation("SupervisorTeam", fields: [supervisorId], references: [id])
+  teamMembers  User[]  @relation("SupervisorTeam")
+
+  tasksAssigned Task[] @relation("AssignedTasks")
+  tasksCreated  Task[] @relation("CreatedTasks")
+  attendance    Attendance[]
+  activities    Activity[]
+  notifications Notification[]
+  ledClients    Client[] @relation("ClientLeads")
+  pushSubscriptions PushSubscription[]
+
+  @@index([supervisorId])
+  @@index([clientId])
+}
+
+model Client {
+  id       String   @id @default(cuid())
+  name     String
+  contact  String?
+  notes    String?
+  isActive Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tasks       Task[]
+  credentials ClientCredential[]
+  leads       User[] @relation("ClientLeads")
+  incomes     Income[]
+  sharePosts  SharePost[]
+  /// Paylaşım Takvimi'nde bu müşterinin renk kodu (#rrggbb); boşsa otomatik renk atanır.
+  shareColor  String?
+  adAccounts  AdAccount[]
+  socialAccounts SocialAccount[]
+  reports     ClientReport[]
+  /// Her ay sonunda (ayın 1'inde, önceki ay için) müşteri paneline otomatik aylık rapor eklensin mi.
+  autoMonthlyReport Boolean @default(false)
+  /// Otomatik rapor ne zamandan beri açık (açıldığı aydan önceki aylar için geriye dönük rapor üretilmez).
+  autoReportSince DateTime?
+
+  /// Müşteri paneli girişleri.
+  users       User[] @relation("ClientUsers")
+  requests    ClientRequest[]
+  contentItems ContentItem[]
+  contentDocs  ContentDoc[]
+  /// Her ay bu günden itibaren (1-28) tahsil edilmemiş cari ay geliri gecikmiş sayılır; boşsa sadece geçmiş aylar gecikmiş sayılır.
+  paymentDueDay Int?
+  /// Ödeme gecikmesi bildirim sıklığı (müşteri başına).
+  notifyMode  ClientNotifyMode @default(LOGIN_POPUP)
+  lastPaymentNotifyAt DateTime?
+  /// Bu müşteriye sunulan reklam yönetimi hizmetleri: işaretli olmayan platformun verisi müşteri panelinde gösterilmez.
+  metaAdsManaged   Boolean @default(false)
+  googleAdsManaged Boolean @default(false)
+  /// Sosyal medya yönetim hizmeti alıyor mu? Almayan (sadece reklam alan) müşteri İçerik/Talepler/Paylaşım Takvimi bölümlerini kullanamaz.
+  socialManaged Boolean @default(true)
+  /// Müşteri panelinde İçerik bölümünü düzenleyebilir mi (false = sadece görüntüler).
+  contentEditable Boolean @default(false)
+  /// Müşteri paylaşım takviminde görsel üzerine çizip yazarak revize isteği gönderebilir mi (false = sadece görüntüler).
+  shareRevisionEnabled Boolean @default(false)
+  googleAdAccounts GoogleAdAccount[]
+}
+
+enum ClientNotifyMode {
+  /// Her gün telefona bildirim
+  DAILY
+  /// Haftada 1 telefona bildirim
+  WEEKLY
+  /// Sadece panele her girişte açılır pencere
+  LOGIN_POPUP
+  /// Saat başı bildirim
+  HOURLY
+  /// Bildirim yok
+  NONE
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Müşterinin panelden oluşturduğu iş talebi. Admin onaylarsa bir Task'a dönüşür.
+model ClientRequest {
+  id          String        @id @default(cuid())
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdById String
+  title       String
+  details     String?
+  note        String?
+  urgency     Urgency       @default(MEDIUM)
+  /// Referans görsel / videolar (çoklu).
+  files       ClientRequestFile[]
+  status      RequestStatus @default(PENDING)
+  decisionNote String?
+  decidedAt   DateTime?
+  taskId      String?       @unique
+  task        Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  /// REQUEST = müşterinin açtığı iş talebi, REVISION = paylaşım takvimindeki görsel için revize isteği.
+  kind        String        @default("REQUEST")
+  /// Revize isteğinin ait olduğu paylaşım (silinmiş olabilir; bilgi amaçlı). Eski revize istekleri için.
+  sharePostId String?
+  /// Revize isteği içerik tablosundaki bir satırın teslimi için ise o satır (silinmiş olabilir).
+  contentItemId String?
+  /// Revize isteği başka bir talebin teslimi için ise o talep (silinmiş olabilir).
+  sourceRequestId String?
+
+  /// Tamamlanan iş: ekibin "Müşteri talebine gönder" ile müşteriye sunduğu görsel/videolar.
+  deliveryFiles   DeliveryFile[]
+  /// REVIEW = müşteri onayı bekliyor, APPROVED = onaylandı, REVISION = revize istendi (null = teslim yok).
+  deliveryStatus  String?
+  deliveredAt     DateTime?
+  deliveredByName String?
+  reviewedAt      DateTime?
+  reviewedByName  String?
+
+  @@index([clientId])
+  @@index([status])
+}
+
+/// Tamamlanan iş çıktısı: içerik tablosu satırına ya da müşteri talebine eklenen (Drive'daki) görsel/video.
+/// Dosyalar kopyalanmaz, mevcut Drive dosyasına referans verir.
+model DeliveryFile {
+  id            String        @id @default(cuid())
+  contentItemId String?
+  contentItem   ContentItem?  @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  requestId     String?
+  request       ClientRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  url           String
+  name          String
+  /// IMAGE | VIDEO
+  mediaType     String        @default("IMAGE")
+  position      Int           @default(0)
+
+  @@index([contentItemId])
+  @@index([requestId])
+}
+
+model ClientRequestFile {
+  id        String        @id @default(cuid())
+  requestId String
+  request   ClientRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  url       String
+  name      String
+  position  Int           @default(0)
+
+  @@index([requestId])
+}
+
+model ContentItemFile {
+  id       String      @id @default(cuid())
+  itemId   String
+  item     ContentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  url      String
+  name     String
+  position Int         @default(0)
+
+  @@index([itemId])
+}
+
+/// İçerik Paneli - tablo modülü: bir müşterinin aylık içerik satırları.
+model ContentItem {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int
+  title       String
+  details     String?
+  /// Referans görsel / videolar (çoklu).
+  files       ContentItemFile[]
+  note        String?
+  /// STATIC | STORY | REELS | HORIZONTAL_VIDEO | CUSTOM (boş = seçilmemiş)
+  contentType String?
+  /// "İş olarak ekle" ile oluşturulan iş (silinmiş olabilir; bilgi amaçlı).
+  taskId      String?
+  position    Int      @default(0)
+  createdById String?
+  createdByName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// "Tamamlanan" sütunu: ekibin "İçerik listesine gönder" ile eklediği teslim (elle düzenlenemez).
+  deliveryFiles   DeliveryFile[]
+  /// REVIEW = müşteri onayı bekliyor, APPROVED = onaylandı, REVISION = revize istendi (null = teslim yok).
+  deliveryStatus  String?
+  deliveredAt     DateTime?
+  deliveredByName String?
+  reviewedAt      DateTime?
+  reviewedByName  String?
+
+  @@index([clientId, year, month])
+}
+
+/// İçerik Paneli - düz yazı modülü: Word benzeri editörde yazılan metin (TipTap JSON).
+model ContentDoc {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int
+  title       String
+  body        String
+  createdById String?
+  createdByName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId, year, month])
+}
+
+/// Web push (telefona bildirim) abonelikleri.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum ShareKind {
+  POST
+  STORY
+  REEL
+}
+
+enum ShareCalendarAccess {
+  NONE
+  USE
+  EDIT
+}
+
+/** Paylaşım Takvimi: bir müşteri için belirli güne planlanmış sosyal medya paylaşımı
+ * (görsel + metin). Tarih "YYYY-MM-DD" metni olarak tutulur (saat dilimi kayması olmasın diye). */
+model SharePost {
+  id          String   @id @default(cuid())
+  date        String
+  /// Paylaşım saati "HH:MM" (Türkiye saati); boşsa o gün 10:00'da hatırlatılır.
+  time        String?
+  kind        ShareKind @default(POST)
+  /// Paylaşıldı işareti (null = henüz paylaşılmadı).
+  publishedAt DateTime?
+  publishedById String?
+  /// Meta'da planlandı (sadece ekip görür): alarm çalmaz. Artık elle işaretlenmez; "Meta'da planla" düğmesi koyar.
+  /// (metaStatus boş + metaScheduled = eski, Meta Business Suite'te elle planlanmış kayıt: saati gelince sadece "paylaşıldı" sayılır.)
+  metaScheduled Boolean @default(false)
+  /// Otomatik paylaşım durumu: null | SCHEDULED | PUBLISHING | PUBLISHED | PARTIAL | FAILED
+  metaStatus String?
+  /// Son otomatik paylaşım hatası / uyarısı (ekip görür).
+  metaError String?
+  metaScheduledAt DateTime?
+  metaScheduledById String?
+  metaPublishedAt DateTime?
+  /// Yayınlanan Instagram medyası ve Facebook gönderisi.
+  igMediaId String?
+  igPermalink String?
+  fbPostId String?
+  /// Reels kapak görseli (`/api/files/<id>`); sadece tür REEL iken kullanılır.
+  coverUrl String?
+  coverName String?
+  /// 5 dk kala / 10:00 hatırlatması gönderildi mi (tekrar göndermemek için).
+  reminderSentAt DateTime?
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName  String
+  /// Kısa başlık: tasarım/metin hazır olmasa da paylaşım takvime konabilsin diye.
+  title       String?
+  text        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Kaydırmalı (carousel) paylaşımlar için sıralı görseller.
+  images SharePostImage[]
+
+  @@index([date])
+}
+
+model SharePostImage {
+  id       String    @id @default(cuid())
+  postId   String
+  post     SharePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  url      String
+  name     String?
+  /// 0'dan başlayan sıra; paylaşımda ilk görsel kapak olur.
+  position Int
+  /// IMAGE | VIDEO (kaydırmalı paylaşımda görsel ve video karışık olabilir).
+  mediaType String @default("IMAGE")
+
+  @@index([postId])
+}
+
+/** Müşterinin sosyal medya / hizmet hesap bilgileri (ör. Instagram, Facebook,
+ * web sitesi paneli). Şifre veritabanında şifrelenmiş (AES-256-GCM) olarak
+ * tutulur, sadece admin panelinden istek üzerine çözülüp gösterilir. */
+model ClientCredential {
+  id                String   @id @default(cuid())
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  label             String
+  username          String?
+  encryptedPassword String
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String?
+  fileName    String?
+  fileSize    Int?
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedTasks", fields: [assignedToId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("CreatedTasks", fields: [createdById], references: [id])
+
+  durationValue Int?
+  durationUnit  DurationUnit?
+
+  difficulty Int?
+  urgency    Urgency
+  status     TaskStatus @default(TODO)
+
+  calculatedDeadline DateTime?
+  revisionNote       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  activities    Activity[]
+  notifications Notification[]
+  submissions   TaskSubmission[]
+  /// Yönetici/sorumlunun işi verirken eklediği referans dosyalar (paylaşım takvimine gönderilmez).
+  attachments   TaskAttachment[]
+  /// Müşterinin revize isteğinde eklediği çizimli görseller / yeni dosyalar ("Müşterinin revize referans dosyaları").
+  revisionFiles TaskRevisionFile[]
+  /// Yönetici / müşteri sorumlusunun işe verdiği revizeler (müşteri revizeleri ClientRequest'te tutulur).
+  revisions     TaskRevision[]
+  request       ClientRequest?
+
+  @@index([assignedToId])
+  @@index([clientId])
+  @@index([status])
+}
+
+/// Müşteri revize istediğinde (çizim / not / yeni görsel) revize isteği yönetici tarafından onaylanınca, aynı işin
+/// kartına eklenen dosyalar. Yeni bir iş açılmaz; mevcut iş yeniden "Devam ediyor"a döner.
+model TaskRevisionFile {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  url       String
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  /// Yeni bir revize geldiğinde önceki revizenin dosyaları "eski revize" olur (kartta küçük ve soluk gösterilir).
+  archivedAt DateTime?
+
+  @@index([taskId])
+}
+
+/// İşi veren kişinin eklediği referans / kullanılacak dosya (çoklu). Teslim dosyası değildir;
+/// paylaşım takvimine gönderilecek dosyalar arasında yer almaz.
+model TaskAttachment {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileUrl    String
+  fileName   String
+  fileSize   Int
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+}
+
+/** Çalışanın bir görev için yüklediği teslim dosyalarından her biri (birden
+ * fazla olabilir, ör. kaydırmalı post tasarımının her sayfası). Karşı taraf
+ * (admin/süpervizör) indirdiğinde ya da 3 gün içinde indirilmezse fileUrl
+ * null'lanıp fiziksel dosya silinir; fileName geçmiş kaydı olarak kalır. */
+model TaskSubmission {
+  id           String    @id @default(cuid())
+  taskId       String
+  task         Task      @relation(fields: [taskId], references: [id])
+  fileUrl      String?
+  fileName     String
+  fileSize     Int
+  uploadedAt   DateTime  @default(now())
+  downloadedAt DateTime?
+  /// Kartta gösterilen sıra (kaydırmalı postta kapak 0). Elle sürükleyerek değiştirilir.
+  position     Int       @default(0)
+
+  @@index([taskId])
+}
+
+model Attendance {
+  id      String   @id @default(cuid())
+  userId  String
+  user    User     @relation(fields: [userId], references: [id])
+  date    DateTime
+  dayType DayType  @default(NONE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id])
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_PENDING_APPROVAL
+  TASK_RETURNED
+  TASK_UNASSIGNED
+  CLIENT_REQUEST
+  REQUEST_DECISION
+  PAYMENT_REMINDER
+  TASK_DONE
+  SHARE_REMINDER
+  /// Ekip bir teslimi müşteriye sundu (müşteriye).
+  DELIVERY_READY
+  /// Müşteri bir teslimi onayladı (yöneticilere).
+  DELIVERY_APPROVED
+  /// Teklif / rapor verildikten sonra işletmeyle iletişime geçme hatırlatması (Teklifler sayfası).
+  PROPOSAL_REMINDER
+  /// Aylık müşteri raporu müşteri paneline eklendi (müşteriye).
+  REPORT_READY
+}
+
+model Notification {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  taskId    String?
+  task      Task?             @relation(fields: [taskId], references: [id])
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean           @default(false)
+  createdAt DateTime          @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum CollectionStatus {
+  NONE
+  HALF
+  FULL
+  /// Müşteri bir kısmını ödedi; tahsil edilen tutar Income.collectedAmount'ta.
+  PARTIAL
+}
+
+/** Finans: aylık gelir (ciro) kalemi. Tutar KDV dahil kabul edilir; fatura
+ * kesildiyse KDV tutarın %20'si olarak hesaplanır. Tahsilat durumu: hiç
+ * tahsil edilmedi / yarısı tahsil edildi / tamamı tahsil edildi. */
+model Income {
+  id          String           @id @default(cuid())
+  year        Int
+  month       Int
+  clientId    String?
+  client      Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName  String
+  service     String?
+  amount      Decimal
+  invoiced    Boolean          @default(false)
+  /// Boşsa KDV = tutar x %20; doluysa (ör. eski aylarda tabloya elle girilen KDV) bu tutar kullanılır.
+  vatOverride Decimal?
+  collection  CollectionStatus @default(NONE)
+  /// collection = PARTIAL iken tahsil edilen özel tutar.
+  collectedAmount Decimal?
+  note        String?
+  /// "Aylık düzenli" gelirler bir seriye bağlıdır; seri aktifken sonraki aya otomatik kopyalanır.
+  seriesId    String?
+  series      IncomeSeries?    @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([year, month])
+  @@index([seriesId])
+}
+
+/** Finans: aylık düzenli gelir serisi. Aktifken serinin en son kaydı, içinde
+ * bulunulan aydan bir sonraki aya kadar her aya otomatik kopyalanır (tahsilat
+ * "Bekliyor" olarak). lastIndex: en son hangi aya kadar üretildi (monthIndex);
+ * bir ayın kaydı silinse bile o ay yeniden üretilmez. */
+model IncomeSeries {
+  id        String   @id @default(cuid())
+  active    Boolean  @default(true)
+  lastIndex Int
+  incomes   Income[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/** Finans: aylık genel gider kalemi (tutar = birim fiyat x adet). */
+model Expense {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int
+  label     String
+  unitPrice Decimal
+  quantity  Int      @default(1)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([year, month])
+}
+
+/** Finans: her aya otomatik devreden sabit gider (kira, muhasebe, aidat...).
+ * fromYear/fromMonth'tan itibaren geçerlidir; endYear/endMonth doluysa o aya
+ * kadar (dahil). Tek bir ayda kaldırmak FixedExpenseSkip kaydı oluşturur. */
+model FixedExpense {
+  id        String   @id @default(cuid())
+  label     String
+  unitPrice Decimal
+  quantity  Int      @default(1)
+  note      String?
+  fromYear  Int
+  fromMonth Int
+  endYear   Int?
+  endMonth  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  skips FixedExpenseSkip[]
+}
+
+model FixedExpenseSkip {
+  id             String       @id @default(cuid())
+  fixedExpenseId String
+  fixedExpense   FixedExpense @relation(fields: [fixedExpenseId], references: [id], onDelete: Cascade)
+  year           Int
+  month          Int
+
+  @@unique([fixedExpenseId, year, month])
+}
+
+/** Finans: bir çalışanın puantajdan gelen sabit gider satırını tek bir ay için kaldırır. */
+model PayrollSkip {
+  id     String @id @default(cuid())
+  userId String
+  year   Int
+  month  Int
+
+  @@unique([userId, year, month])
+}
+
+/// Meta (Facebook/Instagram) reklam hesabı. Bir müşteriye bağlanabilir; bir müşterinin birden çok hesabı olabilir.
+model AdAccount {
+  id         String    @id @default(cuid())
+  /// Meta'daki hesap numarası ("act_" öneki olmadan).
+  metaId     String    @unique
+  name       String
+  /// Meta account_status (1 = aktif, 2 = devre dışı ...).
+  status     Int?
+  currency   String?
+  timezone   String?
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// Sistem kullanıcısının bu hesapta kampanya yönetme yetkisi var mı (Meta user_tasks içinde MANAGE/ADVERTISE).
+  canManage  Boolean   @default(false)
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  campaigns AdCampaign[]
+  insights  AdInsightDaily[]
+}
+
+model AdCampaign {
+  id              String    @id @default(cuid())
+  metaId          String    @unique
+  adAccountId     String
+  adAccount       AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  name            String
+  status          String
+  /// ACTIVE, PAUSED, ARCHIVED, WITH_ISSUES ...
+  effectiveStatus String
+  objective       String?
+  dailyBudget     Decimal?
+  startTime       DateTime?
+  stopTime        DateTime?
+  /// Meta'da oluşturulma zamanı (yeni / taslak kampanyaları listelemek için).
+  createdTime     DateTime?
+
+  @@index([adAccountId])
+}
+
+/// Kampanya bazında günlük performans (Meta Insights).
+model AdInsightDaily {
+  id             String    @id @default(cuid())
+  adAccountId    String
+  adAccount      AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaignMetaId String
+  campaignName   String
+  /// "YYYY-MM-DD" (reklam hesabının saat dilimine göre).
+  date           String
+  spend          Decimal
+  impressions    Int       @default(0)
+  reach          Int       @default(0)
+  clicks         Int       @default(0)
+  linkClicks     Int       @default(0)
+  messages       Int       @default(0)
+  leads          Int       @default(0)
+  purchases      Int       @default(0)
+
+  @@unique([adAccountId, campaignMetaId, date])
+  @@index([date])
+}
+
+/// Google Ads müşteri hesabı (yönetici hesabın altındaki). Müşteriye bağlanınca portalda görünür.
+model GoogleAdAccount {
+  id         String    @id @default(cuid())
+  /// Google Ads müşteri numarası, tiresiz (ör. 1234567890).
+  customerId String    @unique
+  name       String
+  currency   String?
+  timezone   String?
+  /// ENABLED, CANCELED, SUSPENDED ...
+  status     String?
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  campaigns GoogleAdCampaign[]
+  insights  GoogleAdInsightDaily[]
+}
+
+model GoogleAdCampaign {
+  id          String          @id @default(cuid())
+  /// Google kampanya kimliği.
+  campaignId  String          @unique
+  adAccountId String
+  adAccount   GoogleAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  name        String
+  /// ENABLED, PAUSED, REMOVED
+  status      String
+  /// SEARCH, DISPLAY, PERFORMANCE_MAX, SHOPPING, VIDEO ...
+  channelType String?
+  dailyBudget Decimal?
+
+  @@index([adAccountId])
+}
+
+/// Kampanya bazında günlük performans (Google Ads).
+model GoogleAdInsightDaily {
+  id           String          @id @default(cuid())
+  adAccountId  String
+  adAccount    GoogleAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaignId   String
+  campaignName String
+  /// "YYYY-MM-DD" (hesabın saat dilimine göre).
+  date         String
+  cost         Decimal
+  impressions  Int             @default(0)
+  clicks       Int             @default(0)
+  conversions  Decimal         @default(0)
+
+  @@unique([adAccountId, campaignId, date])
+  @@index([date])
+}
+
+/// Anahtar-değer ayarları (ör. şifrelenmiş Meta erişim anahtarı).
+model IntegrationSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Google Drive'da (Ortak Drive) saklanan dosya. Siteden `/api/files/<id>` ile, yetki kontrolüyle sunulur.
+/// Dosya Drive'da müşteri / "Kasım 2026" klasöründe durur; iş, teslim ve paylaşımlar sadece buna referans verir.
+model StoredFile {
+  id           String   @id @default(cuid())
+  driveFileId  String   @unique
+  name         String
+  mimeType     String
+  size         Int
+  clientId     String?
+  /// SHARE (paylaşım takvimi) | TASK (iş eki) | SUBMISSION (çalışan teslimi)
+  kind         String
+  /// Bilgi amaçlı: "Dynamic HR / Kasım 2026"
+  folderPath   String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([clientId])
+}
+
+/// Drive klasör kimlikleri önbelleği (her yüklemede klasör aramamak için).
+/// key: "c:<müşteriId|none>" veya "m:<müşteriId|none>:<YYYY-MM>"
+model DriveFolder {
+  key     String @id
+  driveId String
+}
+
+/// Teklifler sayfası: işletmeye verilen teklif ya da rapor. Dosyalar Drive'da "Teklifler / Ay Yıl" klasöründe tutulur.
+model Proposal {
+  id          String   @id @default(cuid())
+  companyName String
+  /// NEW (yeni kurulmuş) | SMALL | MEDIUM | LARGE
+  companySize String
+  /// PROPOSAL = teklif, REPORT = rapor
+  kind        String   @default("PROPOSAL")
+  /// Rapor olarak verilip sonradan teklife çevrildi mi (istatistik için).
+  fromReport  Boolean  @default(false)
+  /// Hizmet anahtarları (JSON dizi metni), ör. ["SOCIAL","META_ADS"].
+  services    String   @default("[]")
+  /// "Özel" hizmetin açıklaması.
+  customService String?
+  contactName  String?
+  contactPhone String?
+  /// İlk teklifin / raporun tarihi "YYYY-MM-DD".
+  date        String
+  /// En son iletilen dosyanın tarihi (hatırlatma bundan sayılır).
+  lastSentDate String
+  /// PENDING = sonuç bekleniyor, REVISION = teklif revizesi istendi (bizden bekleniyor), APPROVED, REJECTED
+  status      String   @default("PENDING")
+  resultNote  String?
+  resultAt    DateTime?
+  /// İletişim hatırlatması gönderildi mi (yeni dosya / bekleme durumu gelince sıfırlanır).
+  reminderSentAt DateTime?
+  createdById   String?
+  createdByName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  files ProposalFile[]
+
+  @@index([date])
+  @@index([status])
+}
+
+/// Bir teklifin dosya sürümleri (ilk dosya + revizeler). En yüksek sürüm son iletilen tekliftir.
+model ProposalFile {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  version    Int
+  /// REPORT | PROPOSAL | REVISION
+  type       String
+  /// Dosya adresi (/api/files/<id>)
+  url        String
+  name       String
+  /// Bu sürümün iletildiği tarih "YYYY-MM-DD".
+  date       String
+  uploadedByName String?
+  createdAt  DateTime @default(now())
+
+  @@index([proposalId])
+}
+
+/// Sosyal Medya: bir Facebook sayfası + bağlı Instagram hesabı (Meta'dan sistem kullanıcısı üzerinden okunur).
+model SocialAccount {
+  id         String   @id @default(cuid())
+  pageId     String   @unique
+  pageName   String
+  igId       String?
+  igUsername String?
+  clientId   String?
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// Müşteri panelindeki "Gelişim" sayfasında görünsün mü (admin açar).
+  visibleToClient Boolean @default(false)
+  /// Bu hesapta bizim adımıza paylaşım yapılabiliyor mu (anahtarda paylaşım izni + sayfada "İçerik" yetkisi).
+  /// Meta'dan düzenli okunur; false ise Paylaşım Takvimi'nde "Meta'da planla" kapalıdır (paylaşım elle yapılır).
+  canPublish Boolean @default(false)
+  lastSyncAt DateTime?
+  lastError  String?
+  createdAt  DateTime @default(now())
+
+  daily SocialDaily[]
+  media SocialMedia[]
+}
+
+/// Günlük kayıt: o günkü takipçi sayıları ve günlük performans (geçmiş böylece kalıcı birikir).
+model SocialDaily {
+  id        String        @id @default(cuid())
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /// "YYYY-MM-DD"
+  date      String
+  igFollowers Int?
+  fbFollowers Int?
+  /// Instagram'ın bildirdiği günlük net takipçi değişimi (100+ takipçide gelir).
+  followerDelta Int?
+  reach        Int?
+  profileViews Int?
+  accountsEngaged Int?
+  totalInteractions Int?
+  views        Int?
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, date])
+}
+
+model SocialMedia {
+  id        String        @id @default(cuid())
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  igMediaId String        @unique
+  caption   String?
+  /// IMAGE | VIDEO | CAROUSEL_ALBUM
+  mediaType String
+  /// FEED | REELS | STORY ...
+  product   String?
+  permalink String?
+  thumbnailUrl String?
+  postedAt  DateTime
+  likes     Int @default(0)
+  comments  Int @default(0)
+  reach     Int?
+  views     Int?
+  saved     Int?
+  shares    Int?
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId, postedAt])
+}
+
+/// Müşteriye iletilen (ya da taslak) aylık rapor: oluşturulduğu andaki verilerin değişmeyen kopyası (JSON).
+model ClientReport {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  year      Int
+  month     Int
+  /// ReportData (bkz. src/lib/reports.ts) JSON metni.
+  data      String
+  /// AUTO = ay sonunda otomatik, MANUAL = yönetici "Rapor oluştur" dedi.
+  source    String   @default("MANUAL")
+  createdByName String?
+  createdAt DateTime @default(now())
+  /// Müşteri panelinde görünmeye başladığı an (null = taslak, sadece yönetici görür).
+  publishedAt DateTime?
+
+  @@index([clientId, year, month])
+}
+
+/// Yönetici revizesi: iş müşteriye gitmeden (ya da sonradan) ekip içinde "düzelt" denmesi. Müşteri revizelerinden ayrı sayılır.
+model TaskRevision {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// ADMIN = yönetici / müşteri sorumlusu.
+  source    String   @default("ADMIN")
+  note      String
+  byId      String?
+  byName    String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+enum RadioStatus {
+  QUEUED
+  PLAYING
+  PLAYED
+  SKIPPED
+  FAILED
+}
+
+/// Ofis Radyosu: çalışanların sıraya eklediği YouTube şarkıları. Ofisteki TV ekranı (/radyo-tv/<token>) sırayla çalar.
+model RadioTrack {
+  id          String      @id @default(cuid())
+  videoId     String
+  title       String
+  channel     String?
+  addedById   String
+  addedByName String
+  status      RadioStatus @default(QUEUED)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime    @default(now())
+  skipVotes   RadioSkipVote[]
+
+  @@index([status, createdAt])
+}
+
+model RadioSkipVote {
+  trackId String
+  track   RadioTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  userId  String
+  createdAt DateTime @default(now())
+
+  @@id([trackId, userId])
+}
