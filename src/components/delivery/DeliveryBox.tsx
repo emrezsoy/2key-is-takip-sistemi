@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Download, Eye, Film, PenLine, Trash2, Undo2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Eye, Film, PenLine, Send, Trash2, Undo2, X } from "lucide-react";
 import { downloadHref } from "@/components/ui/MediaLightbox";
 import { deleteDeliveryFiles } from "@/lib/actions/fileRemoval";
-import { approveDelivery, clearDelivery, type DeliveryTarget } from "@/lib/actions/deliveries";
+import { approveDelivery, clearDelivery, releaseDelivery, type DeliveryTarget } from "@/lib/actions/deliveries";
 import { useUploader } from "@/lib/useUploader";
 import { RevisionEditor } from "./RevisionEditor";
 
 export type DeliveryFileRow = { id: string; url: string; name: string; mediaType: "IMAGE" | "VIDEO" };
-export type DeliveryStatus = "REVIEW" | "APPROVED" | "REVISION";
+/** DRAFT = ekip içinde onaylandı, müşteriye henüz gönderilmedi (müşteri görmez). */
+export type DeliveryStatus = "DRAFT" | "REVIEW" | "APPROVED" | "REVISION";
 export type DeliveryInfo = {
   status: DeliveryStatus;
   files: DeliveryFileRow[];
@@ -18,14 +19,18 @@ export type DeliveryInfo = {
   deliveredByName: string | null;
   reviewedAt: string | null;
   reviewedByName: string | null;
+  /** Paylaşım metni (caption); görselle birlikte onaylanır. */
+  caption?: string | null;
 };
 
 export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+  DRAFT: "Müşteriye gönderilmedi",
   REVIEW: "Onay bekliyor",
   APPROVED: "Onaylandı",
   REVISION: "Revize istendi",
 };
 export const DELIVERY_STATUS_STYLE: Record<DeliveryStatus, string> = {
+  DRAFT: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
   REVIEW: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
   APPROVED: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
   REVISION: "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300",
@@ -159,6 +164,13 @@ export function DeliveryBox({
         ))}
       </div>
 
+      {delivery.caption && (
+        <details className="rounded-lg border border-(--color-border) bg-(--color-surface-muted) px-2 py-1.5 text-xs">
+          <summary className="cursor-pointer select-none font-semibold text-(--color-text-muted)">Caption</summary>
+          <p className="mt-1 whitespace-pre-wrap break-words">{delivery.caption}</p>
+        </details>
+      )}
+
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${DELIVERY_STATUS_STYLE[status]}`}>
           {DELIVERY_STATUS_LABEL[status]}
@@ -194,6 +206,18 @@ export function DeliveryBox({
       {(extra || canClear || canTeamRevise) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {extra}
+          {canClear && status === "DRAFT" && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => run(() => releaseDelivery(target))}
+              title="Müşteri bu çalışmayı içerik listesinde görsün ve onay / revize versin"
+              className="flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+            >
+              <Send size={13} />
+              Müşteriye gönder
+            </button>
+          )}
           {canTeamRevise && status !== "REVISION" && (
             <button
               type="button"
@@ -324,6 +348,12 @@ export function DeliveryBox({
                 </div>
 
                 <div className="space-y-2 border-t border-(--color-border) p-4">
+                  {delivery.caption && (
+                    <div className="max-h-32 overflow-y-auto rounded-lg bg-(--color-surface-muted) px-3 py-2 text-sm">
+                      <p className="mb-0.5 text-[11px] font-semibold uppercase text-(--color-text-muted)">Caption</p>
+                      <p className="whitespace-pre-wrap break-words">{delivery.caption}</p>
+                    </div>
+                  )}
                   {error && <p className="text-xs text-brand-600">{error}</p>}
                   <div className="flex flex-wrap items-center gap-2">
                     <button

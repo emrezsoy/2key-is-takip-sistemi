@@ -13,7 +13,7 @@ export default async function PortalContent({
   const sp = await searchParams;
   const { year, month } = parseMonthParams(sp.y, sp.m);
   const [{ items, docs }, months] = await Promise.all([
-    loadContent(user.clientId, year, month),
+    loadContent(user.clientId, year, month, { forClient: true, hideBrief: !user.contentEditable }),
     loadContentMonths(user.clientId),
   ]);
 
@@ -24,7 +24,7 @@ export default async function PortalContent({
         <p className="text-sm text-(--color-text-muted)">
           {user.contentEditable
             ? "Kendi içeriklerinizi tablo ya da düz yazı olarak yazabilirsiniz; ekibimiz buradan görür. Bizim sizin için yazdığımız içerikler de burada görünür. Tamamladığımız işler \"Tamamlanan\" sütununda sizi bekler: onaylayabilir ya da revize isteyebilirsiniz."
-            : "Sizin için hazırladığımız içerikleri burada görüntüleyebilirsiniz. Tamamladığımız işler \"Tamamlanan\" sütununda sizi bekler: onaylayabilir ya da revize isteyebilirsiniz. İçerik metinlerinde değişiklik yapma yetkiniz bulunmuyor; bir değişiklik isterseniz bizimle iletişime geçin."}
+            : "Sizin için hazırladığımız çalışmalar burada onayınızı bekler. Görseli ve paylaşım metnini (caption) inceleyip onaylayabilir ya da revize isteyebilirsiniz."}
         </p>
       </div>
       <ContentWorkspace
@@ -39,6 +39,7 @@ export default async function PortalContent({
         canReview
         clientView
         canRevise={user.shareRevisionEnabled}
+        briefHidden={!user.contentEditable}
       />
     </div>
   );

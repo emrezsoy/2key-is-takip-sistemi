@@ -69,6 +69,8 @@ model User {
   adManageAccess Boolean   @default(false)
   /// İçerik Paneli (müşteri içerikleri) düzenleme yetkisi. Admin her zaman erişir.
   contentAccess  Boolean   @default(false)
+  /// Mesaj Otomasyonu ekranlarını görebilir / yönetebilir (sorumlu olduğu müşterilerde). Admin her zaman.
+  dmAccess       Boolean   @default(false)
   /// Ana ekrandaki müşteri kutularının kişiye özel sırası (müşteri id'lerinin JSON dizisi).
   clientOrder    String?
   /// Müşteri hesabı: bağlı olduğu müşteri (role = CLIENT).
@@ -144,6 +146,34 @@ model Client {
   /// Müşteri paylaşım takviminde görsel üzerine çizip yazarak revize isteği gönderebilir mi (false = sadece görüntüler).
   shareRevisionEnabled Boolean @default(false)
   googleAdAccounts GoogleAdAccount[]
+
+  /// Mesaj Otomasyonu (Instagram / Facebook DM'lerini AI ile yanıtlama) hizmeti alıyor mu? Ana anahtar.
+  dmManaged           Boolean @default(false)
+  /// Mesaj Otomasyonu modülleri: randevu, ürün/stok, görsel-video analizi.
+  dmModuleAppointment Boolean @default(false)
+  dmModuleProducts    Boolean @default(false)
+  dmModuleMedia       Boolean @default(true)
+  /// Müşterinin kendi panelinden AI'ı durdurması (true = AI cevap vermez, mesajlar gelen kutusuna düşer).
+  dmPaused            Boolean @default(false)
+
+  dmConfig         DmConfig?
+  dmPrompts        DmPromptVersion[]
+  dmBusinessInfos  DmBusinessInfo[]
+  dmKnowledge      DmKnowledgeItem[]
+  dmContacts       DmContact[]
+  dmConversations  DmConversation[]
+  dmMessages       DmMessage[]
+  dmOwnerQuestions DmOwnerQuestion[]
+  dmCreditLedger   DmCreditLedger[]
+  dmPeriods        DmSubscriptionPeriod[]
+  dmAvailability   DmAvailabilityRule[]
+  dmAppointments   DmAppointment[]
+  dmStores         DmStoreConnection[]
+  dmProducts       DmProduct[]
+  dmFollowUps      DmFollowUp[]
+  dmOnboardings    DmOnboardingSession[]
+  dmAiUsage        DmAiUsage[]
+  dmCreditRequests DmCreditRequest[]
 }
 
 enum ClientNotifyMode {
@@ -194,7 +224,8 @@ model ClientRequest {
 
   /// Tamamlanan iş: ekibin "Müşteri talebine gönder" ile müşteriye sunduğu görsel/videolar.
   deliveryFiles   DeliveryFile[]
-  /// REVIEW = müşteri onayı bekliyor, APPROVED = onaylandı, REVISION = revize istendi (null = teslim yok).
+  /// DRAFT = ekip içinde onaylandı, müşteriye henüz açılmadı; REVIEW = müşteri onayı bekliyor, APPROVED = onaylandı,
+  /// REVISION = revize istendi (null = teslim yok).
   deliveryStatus  String?
   deliveredAt     DateTime?
   deliveredByName String?
@@ -266,6 +297,12 @@ model ContentItem {
   createdByName String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  /// Paylaşım metni (caption): ekip yazar, müşteri görselle birlikte onaylar. Boş olabilir.
+  caption     String?
+  /// Planlanan paylaşım günü "YYYY-MM-DD" ve saati "HH:MM" (Türkiye); takvime / Meta'ya gönderirken kullanılır.
+  shareDate   String?
+  shareTime   String?
 
   /// "Tamamlanan" sütunu: ekibin "İçerik listesine gönder" ile eklediği teslim (elle düzenlenemez).
   deliveryFiles   DeliveryFile[]
@@ -424,6 +461,8 @@ model Task {
 
   calculatedDeadline DateTime?
   revisionNote       String?
+  /// Paylaşım metni (caption): ekip / süpervizör / admin yazar; içerik listesine teslimle birlikte gider. Boş olabilir.
+  caption            String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -539,6 +578,28 @@ enum NotificationType {
   PROPOSAL_REMINDER
   /// Aylık müşteri raporu müşteri paneline eklendi (müşteriye).
   REPORT_READY
+  /// Mesaj Otomasyonu: kredi azaldı (%20 / %5) — müşteri + admin.
+  DM_CREDIT_LOW
+  /// Mesaj Otomasyonu: kredi bitti, AI durdu (bir kez) — müşteri + admin.
+  DM_CREDIT_EMPTY
+  /// Mesaj Otomasyonu: AI dururken cevapsız kalan mesajların günlük özeti (müşteriye).
+  DM_DAILY_MISSED
+  /// Mesaj Otomasyonu: ödenmiş dönemin bitmesine az kaldı (admine).
+  DM_RENEWAL_DUE
+  /// Mesaj Otomasyonu: bugün gidecek takip mesajları onay bekliyor (müşteriye).
+  DM_FOLLOWUP_APPROVAL
+  /// Mesaj Otomasyonu: yeni randevu talebi (müşteriye).
+  DM_APPOINTMENT_REQUEST
+  /// Mesaj Otomasyonu: sıcak müşteri tespit edildi (müşteriye).
+  DM_HOT_LEAD
+  /// Mesaj Otomasyonu: AI'ın cevaplayamadığı soru işletme sahibine soruldu (müşteriye).
+  DM_AI_QUESTION
+  /// Mesaj Otomasyonu: kurulum çıktısı / prompt değişikliği onay bekliyor (admine).
+  DM_APPROVAL_PENDING
+  /// Mesaj Otomasyonu: konuşma insana devredildi (müşteriye).
+  DM_HANDOFF
+  /// AI sağlayıcısı ödeme / anahtar hatası verdi (sadece adminler).
+  DM_AI_PROVIDER_ERROR
 }
 
 model Notification {
@@ -550,6 +611,8 @@ model Notification {
   type      NotificationType
   title     String
   message   String
+  /// Bildirime tıklanınca açılacak sayfa (boşsa iş / varsayılan sayfa).
+  url       String?
   read      Boolean           @default(false)
   createdAt DateTime          @default(now())
 
@@ -885,6 +948,9 @@ model SocialAccount {
 
   daily SocialDaily[]
   media SocialMedia[]
+
+  /// Mesaj Otomasyonu: gelen Instagram DM'i hangi müşteriye ait, IG hesap id'siyle bulunur.
+  @@index([igId])
 }
 
 /// Günlük kayıt: o günkü takipçi sayıları ve günlük performans (geçmiş böylece kalıcı birikir).
@@ -999,4 +1065,740 @@ model RadioSkipVote {
   createdAt DateTime @default(now())
 
   @@id([trackId, userId])
+}
+
+// =====================================================================================================
+// MESAJ OTOMASYONU (Instagram / Facebook DM'lerini AI ile yanıtlama). Faz 1.
+// Kanal bağımsız tasarlandı: ileride WEB (site canlı destek) ve WHATSAPP kanalları eklenecek.
+// Kim yaptı bilgisi (onaylayan, ekleyen vb.) mevcut düzendeki gibi id + ad olarak tutulur (User'a bağlanmaz).
+// =====================================================================================================
+
+enum DmChannel {
+  INSTAGRAM
+  FACEBOOK
+}
+
+/// AI = konuşmayı AI yürütüyor, HUMAN = işletme sahibi / ekip devraldı (AI karışmaz).
+enum DmConversationMode {
+  AI
+  HUMAN
+}
+
+/// Sessiz kalan konuşmanın sınıflandırması (takip mesajı yalnızca UNDECIDED için hazırlanır).
+enum DmClassification {
+  UNKNOWN
+  PURCHASED
+  UNDECIDED
+  INFO_DONE
+  PERSONAL
+  SPAM
+}
+
+enum DmDirection {
+  IN
+  OUT
+}
+
+enum DmSender {
+  CONTACT
+  AI
+  HUMAN
+  SYSTEM
+}
+
+/// Giden mesajın durumu (gelen mesajlar her zaman SENT sayılır).
+enum DmDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DmPromptSource {
+  ONBOARDING
+  CLIENT_EDIT
+  ADMIN_EDIT
+}
+
+enum DmApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DmKnowledgeSource {
+  /// AI'ın sorduğu soruya işletme sahibinin verdiği cevap.
+  OWNER_ANSWER
+  ONBOARDING
+  ADMIN
+}
+
+enum DmOwnerQuestionStatus {
+  PENDING
+  ANSWERED
+  /// Cevap geldiğinde 24 saat penceresi kapanmıştı (müşteriye iletilemedi) ya da vazgeçildi.
+  CLOSED
+}
+
+enum DmJobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum DmLedgerType {
+  /// Abonelik döneminde aylık plan kredisi yüklemesi.
+  PLAN_GRANT
+  /// Önceki ayın kullanılmayan plan kredisinin silinmesi.
+  PLAN_EXPIRE
+  /// Kalıcı kredi satışı / yüklemesi.
+  TOPUP
+  /// Elle düzeltme (+/-).
+  ADJUSTMENT
+  /// AI cevabı / takip mesajı harcaması.
+  USAGE
+  /// İade (ör. hatalı harcama).
+  REFUND
+}
+
+/// Plan kredisi ay sonunda silinir; kalıcı kredi silinmez. Harcama önce PLAN'dan yapılır.
+enum DmCreditBucket {
+  PLAN
+  PERMANENT
+}
+
+enum DmAvailabilityKind {
+  /// Haftalık açık saat aralığı (weekday + startTime-endTime).
+  WEEKLY_OPEN
+  /// Kapalı tarih aralığı (startAt-endAt): tatil, izin vb.
+  CLOSED_RANGE
+}
+
+enum DmAppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  REJECTED
+  RESCHEDULE_PROPOSED
+  CANCELLED
+}
+
+enum DmAppointmentSource {
+  AI
+  MANUAL
+}
+
+enum DmStorePlatform {
+  SHOPIFY
+  IKAS
+  TICIMAX
+  MANUAL
+}
+
+enum DmFollowUpStatus {
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  /// 24 saat penceresi kapandığı / kapanmak üzere olduğu için gönderilmedi ("kaçan fırsatlar"; kredi düşmez).
+  SKIPPED_EXPIRED
+  REJECTED
+}
+
+enum DmOnboardingStatus {
+  /// Admin oluşturdu, görüşme başlamadı.
+  DRAFT
+  IN_CALL
+  /// Görüşme bitti, dosya yükleme ("son adım") bekleniyor.
+  UPLOADS
+  ANALYZING
+  /// Analiz çıktısı admin onayı bekliyor.
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+/// Müşteri başına Mesaj Otomasyonu ayarları (1 satır).
+model DmConfig {
+  id       String @id @default(cuid())
+  clientId String @unique
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  /// AI model seçimleri "sağlayıcı:model" biçiminde (ör. "gemini:gemini-flash"); boşsa genel varsayılan kullanılır.
+  textModel     String?
+  mediaModel    String?
+  classifyModel String?
+  setupModel    String?
+
+  /// Yayındaki (onaylı) prompt sürümü.
+  activePromptId String?
+
+  /// Mesai saatleri JSON: { "1": [["09:00","18:00"]], ... } (1 = Pazartesi, 7 = Pazar). Boşsa her zaman açık sayılır.
+  businessHours Json?
+  timezone      String  @default("Europe/Istanbul")
+  holidayMode    Boolean   @default(false)
+  holidayMessage String?
+  holidayUntil   DateTime?
+
+  /// Bekleme/toplama süreleri (saniye): son mesaj metinse / medyaysa beklenen süre ve ilk mesajdan itibaren üst sınır.
+  waitTextSec  Int @default(9)
+  waitMediaSec Int @default(35)
+  waitMaxSec   Int @default(60)
+  /// Cevap üretilirken konuşma geçmişinden alınacak son mesaj sayısı.
+  historyLimit Int @default(30)
+
+  /// Takip mesajları.
+  followUpEnabled     Boolean @default(true)
+  /// Konuşma bu kadar dakika sessiz kalınca sınıflandırılır.
+  followUpSilenceMin  Int     @default(180)
+  /// İşletme sahibine onay bildiriminin gideceği saat "HH:MM".
+  followUpNotifyTime  String  @default("09:30")
+  /// Hedef gönderim aralığı (ertesi sabah) ve pencere erken kapanıyorsa aynı gün akşam aralığı.
+  followUpMorningStart String @default("10:00")
+  followUpMorningEnd   String @default("12:00")
+  followUpEveningStart String @default("17:00")
+  followUpEveningEnd   String @default("20:00")
+  /// Bu saatler arasında gönderim yapılmaz.
+  quietStart          String  @default("22:00")
+  quietEnd            String  @default("09:00")
+  /// Takip mesajları onay beklemeden gönderilsin mi.
+  followUpAutoApprove Boolean @default(false)
+
+  /// Randevu: süre ve iki randevu arasındaki minimum ara (dakika).
+  appointmentDurationMin Int @default(60)
+  appointmentGapMin      Int @default(0)
+  /// Gizli iCal takvim adresi için token (/api/dm/calendar/<token>.ics).
+  calendarToken String? @unique
+
+  /// Eksi bakiye limiti (ör. 2 = bakiye en fazla -2'ye düşebilir); boşsa genel ayar (DmPricing) geçerli.
+  negativeLimit Int?
+  /// "Test et" kutusu kredi harcasın mı.
+  testSpendsCredit Boolean @default(false)
+
+  /// Bakiye önbelleği (tek doğru kaynak DmCreditLedger; bunlar hızlı gösterim içindir).
+  planBalance      Int       @default(0)
+  permanentBalance Int       @default(0)
+  balanceUpdatedAt DateTime?
+  /// Bildirim takibi: en son hangi düşük kredi eşiği bildirildi (20 / 5), kredi bitti bildirimi, günlük özet.
+  lowAlertLevel    Int?
+  emptyNotifiedAt  DateTime?
+  dailyMissedAt    DateTime?
+  /// Kredi bittiğinde AI'ın durduğu an (yeniden başlayınca duraklama sırasında cevapsız kalanlar listelenir).
+  stoppedAt        DateTime?
+  renewalNotifiedAt DateTime?
+  /// Dönem bitip ek süre başladığında "ödeme bekleniyor" bildirimi gönderildi mi.
+  graceNotifiedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Müşterinin panelden "Kredi talep et" ile ilettiği istek (admin ödeme/yükleme girince kapatır).
+model DmCreditRequest {
+  id              String    @id @default(cuid())
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  note            String?
+  requestedById   String?
+  requestedByName String?
+  resolvedAt      DateTime?
+  resolvedByName  String?
+  createdAt       DateTime  @default(now())
+
+  @@index([resolvedAt])
+}
+
+/// AI davranış metni (sistem promptu). Müşteri / admin değişiklikleri onaydan geçer; eski sürüme dönülebilir.
+model DmPromptVersion {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  text     String
+  source   DmPromptSource
+  status   DmApprovalStatus @default(PENDING)
+  note     String?
+  createdById    String?
+  createdByName  String?
+  decidedById    String?
+  decidedByName  String?
+  decidedAt      DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([status])
+}
+
+/// Yapılandırılmış işletme bilgileri (saatler, adres, hizmet/fiyat listesi, kargo, iade...). Her kayıt bir sürümdür;
+/// en büyük version geçerlidir. Müşteri değiştirince hemen geçerli olur.
+model DmBusinessInfo {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  version  Int
+  data     Json
+  createdById   String?
+  createdByName String?
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, version])
+}
+
+/// Soru-cevap bilgi bankası.
+model DmKnowledgeItem {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  question String
+  answer   String
+  source   DmKnowledgeSource
+  isActive Boolean @default(true)
+  createdByName String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId, isActive])
+}
+
+/// Kanal kullanıcısı (DM atan kişi). externalId: Instagram IGSID / Messenger PSID (hesaba özel kimlik).
+model DmContact {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  channel   DmChannel
+  /// Mesajın geldiği işletme hesabı: Facebook sayfa id'si ya da Instagram hesap id'si.
+  accountId String
+  externalId String
+  name      String?
+  username  String?
+  profilePic String?
+  phone     String?
+  email     String?
+  /// Bu kişiye AI cevap vermesin.
+  aiBlocked Boolean  @default(false)
+  tags      String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations DmConversation[]
+  appointments  DmAppointment[]
+
+  @@unique([channel, accountId, externalId])
+  @@index([clientId])
+}
+
+model DmConversation {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   DmContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  channel   DmChannel
+  mode      DmConversationMode @default(AI)
+  /// Kişinin son mesajı: 24 saat penceresi bunun üzerinden hesaplanır.
+  lastUserMessageAt DateTime?
+  lastMessageAt     DateTime?
+  /// Toplanmayı bekleyen (henüz cevaplanmamış) ilk gelen mesajın zamanı: bekleme üst sınırı buradan sayılır.
+  pendingSince      DateTime?
+  classification    DmClassification @default(UNKNOWN)
+  classifiedAt      DateTime?
+  /// Durum etiketleri.
+  appointmentRequested Boolean @default(false)
+  hotLead              Boolean @default(false)
+  waitingHuman         Boolean @default(false)
+  /// AI dururken (kredi bitti / duraklatıldı) cevapsız kaldı.
+  missedWhilePaused    Boolean @default(false)
+  handoffReason        String?
+  /// Panelde okunmamış gelen mesaj sayısı.
+  unreadCount          Int     @default(0)
+  /// Kısa konuşma özeti (sıcak müşteri bildirimi, takip mesajı için).
+  summary              String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages       DmMessage[]
+  ownerQuestions DmOwnerQuestion[]
+  appointments   DmAppointment[]
+  followUps      DmFollowUp[]
+
+  @@unique([contactId])
+  @@index([clientId, lastMessageAt])
+}
+
+model DmMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   DmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  clientId       String
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  direction      DmDirection
+  sender         DmSender
+  text           String?
+  /// Medya listesi JSON: [{ type: "image"|"video"|"audio"|"file", url, storedFileId?, analysisKey? }].
+  media          Json?
+  /// Meta mesaj id'si (mid): aynı olay birden fazla gelirse tekrar kaydedilmez.
+  externalId     String?        @unique
+  /// İşletme sahibinin Instagram / Messenger uygulamasından yazdığı mesajın yankısı.
+  isEcho         Boolean        @default(false)
+  /// Reklam / post / story referansı JSON (referral, ad_id, story reply, paylaşılan post).
+  referral       Json?
+  /// Birlikte toplanıp tek cevapla yanıtlanan gelen mesajlar aynı batchId'yi taşır; cevap da o batchId ile kaydedilir.
+  batchId        String?
+  status         DmDeliveryStatus @default(SENT)
+  error          String?
+  /// AI cevabı: kullanılan model, token ve tahmini maliyet; düşülen kredi.
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  costUsd        Decimal?
+  creditCost     Int?
+  /// İnsan cevabı panelden yazıldıysa kim yazdı.
+  sentById       String?
+  sentByName     String?
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([clientId, createdAt])
+  @@index([batchId])
+}
+
+/// Medya / reklam / post başına yazılı analiz özeti. Aynı reklam bir kez analiz edilir, tüm sohbetlerde tekrar kullanılır.
+model DmMediaAnalysis {
+  id        String   @id @default(cuid())
+  /// Önbellek anahtarı: "ad:<id>", "post:<id>", "story:<id>", "sha256:<hash>".
+  key       String   @unique
+  /// IMAGE | VIDEO | AD | POST | STORY
+  kind      String
+  summary   String
+  model     String?
+  clientId  String?
+  createdAt DateTime @default(now())
+}
+
+/// AI'ın bilmediği soru (ask_owner): işletme sahibine sorulur, cevap bilgi bankasına eklenir ve müşteriye iletilir.
+model DmOwnerQuestion {
+  id             String         @id @default(cuid())
+  clientId       String
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   DmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  question       String
+  answer         String?
+  status         DmOwnerQuestionStatus @default(PENDING)
+  answeredByName String?
+  answeredAt     DateTime?
+  knowledgeItemId String?
+  createdAt      DateTime @default(now())
+
+  @@index([clientId, status])
+}
+
+/// dm-worker kuyruğu (Postgres; SELECT ... FOR UPDATE SKIP LOCKED ile alınır).
+model DmJob {
+  id          String      @id @default(cuid())
+  /// PROCESS_BATCH | ANALYZE_MEDIA | SEND_FOLLOWUP | CLASSIFY | SYNC_PRODUCTS | CREDIT_TICK ...
+  type        String
+  payload     Json?
+  runAt       DateTime    @default(now())
+  status      DmJobStatus @default(PENDING)
+  attempts    Int         @default(0)
+  maxAttempts Int         @default(3)
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?
+  /// Aynı iş iki kez kuyruğa girmesin (ör. "batch:<konuşma id>").
+  dedupeKey   String?     @unique
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status, runAt])
+}
+
+/// Kredi paketi (admin panelinden yönetilir).
+model DmPlan {
+  id             String  @id @default(cuid())
+  name           String
+  monthlyCredits Int
+  /// Bilgi amaçlı fiyat notu (ör. "aylık 2.500 TL + KDV").
+  priceNote      String?
+  isActive       Boolean @default(true)
+  sortOrder      Int     @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  periods DmSubscriptionPeriod[]
+}
+
+/// Ödenmiş abonelik dönemi (otomatik yenileme yok; admin ödeme alınınca girer).
+model DmSubscriptionPeriod {
+  id         String @id @default(cuid())
+  clientId   String
+  client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       DmPlan @relation(fields: [planId], references: [id])
+  /// Girildiği andaki aylık kredi (paket sonradan değişse de dönem etkilenmez).
+  monthlyCredits Int
+  startDate  DateTime
+  months     Int
+  /// Ödenmiş dönemin bittiği an (bu andan itibaren ek süre başlar).
+  paidThrough DateTime
+  note       String?
+  /// Finans'ta oluşturulan gelir kaydı (isteğe bağlı).
+  incomeId   String?
+  createdById   String?
+  createdByName String?
+  cancelledAt   DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([clientId, paidThrough])
+}
+
+/// Kredi hareketleri: bakiye bu tablodan hesaplanır (tek doğru kaynak).
+model DmCreditLedger {
+  id        String         @id @default(cuid())
+  clientId  String
+  client    Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type      DmLedgerType
+  bucket    DmCreditBucket
+  /// Pozitif = yükleme, negatif = harcama / silme.
+  amount    Int
+  messageId      String?
+  conversationId String?
+  periodId       String?
+  /// Aynı hareket iki kez yazılmasın (ör. "grant:<dönem>:<ay>", "usage:<batch>").
+  idempotencyKey String? @unique
+  /// Not (ör. fatura no, düzeltme sebebi).
+  note      String?
+  createdById   String?
+  createdByName String?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
+}
+
+/// Genel kredi fiyatları ve kuralları (tek satır, id = "default").
+model DmPricing {
+  id               String @id @default("default")
+  /// İş türü başına kredi bedeli.
+  textCost         Int @default(1)
+  imageCost        Int @default(2)
+  videoCost        Int @default(3)
+  followUpCost     Int @default(2)
+  /// Daha önce analiz edilmiş reklama / posta gelen mesajın bedeli.
+  cachedMediaCost  Int @default(1)
+  /// Bakiye en fazla bu kadar eksiye düşebilir.
+  negativeLimit    Int @default(2)
+  /// Dönem bitince ödeme beklenirken tanınan ek süre (gün).
+  graceDays        Int @default(3)
+  /// Dönemin bitmesine kaç gün kala admine yenileme bildirimi gider.
+  renewalNoticeDays Int @default(3)
+  /// Düşük kredi bildirim eşikleri (aylık plan kredisinin yüzdesi).
+  lowAlertPercents Int[] @default([20, 5])
+  updatedAt        DateTime @updatedAt
+}
+
+/// Randevu uygunluk kuralı: haftalık açık saatler ya da kapalı tarih aralığı.
+model DmAvailabilityRule {
+  id        String @id @default(cuid())
+  clientId  String
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  kind      DmAvailabilityKind
+  /// WEEKLY_OPEN: 1 = Pazartesi ... 7 = Pazar; saatler "HH:MM".
+  weekday   Int?
+  startTime String?
+  endTime   String?
+  /// CLOSED_RANGE: kapalı aralık.
+  startAt   DateTime?
+  endAt     DateTime?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, kind])
+}
+
+model DmAppointment {
+  id             String @id @default(cuid())
+  clientId       String
+  client         Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contactId      String?
+  contact        DmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversationId String?
+  conversation   DmConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  startAt        DateTime
+  endAt          DateTime
+  status         DmAppointmentStatus @default(REQUESTED)
+  source         DmAppointmentSource
+  customerName   String?
+  customerPhone  String?
+  service        String?
+  note           String?
+  /// İşletmenin önerdiği alternatif zaman (RESCHEDULE_PROPOSED).
+  proposedStartAt DateTime?
+  proposedEndAt   DateTime?
+  decidedByName  String?
+  decidedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([clientId, startAt])
+  @@index([status])
+}
+
+/// Mağaza bağlantısı. credentials: encryptSecret ile şifrelenmiş JSON.
+model DmStoreConnection {
+  id          String @id @default(cuid())
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  platform    DmStorePlatform
+  name        String?
+  /// Mağaza adresi (ör. magaza.myshopify.com).
+  shopDomain  String?
+  credentials String?
+  isActive    Boolean @default(true)
+  lastSyncAt  DateTime?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products DmProduct[]
+}
+
+model DmProduct {
+  id           String @id @default(cuid())
+  clientId     String
+  client       Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  connectionId String?
+  connection   DmStoreConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  /// Mağazadaki ürün id'si (MANUAL ürünlerde boş olabilir).
+  externalId   String?
+  name         String
+  description  String?
+  price        Decimal?
+  currency     String  @default("TRY")
+  url          String?
+  /// Görsel adresleri (JSON dizi).
+  images       Json?
+  isActive     Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  variants   DmProductVariant[]
+  embeddings DmProductEmbedding[]
+
+  @@unique([connectionId, externalId])
+  @@index([clientId, isActive])
+}
+
+model DmProductVariant {
+  id         String    @id @default(cuid())
+  productId  String
+  product    DmProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId String?
+  sku        String?
+  title      String?
+  /// Seçenekler JSON (ör. { "Beden": "M", "Renk": "Siyah" }).
+  options    Json?
+  price      Decimal?
+  /// Elle girilen (MANUAL / Excel) ürünlerde stok; mağaza bağlantılı ürünlerde stok canlı sorgulanır.
+  stock      Int?
+  createdAt  DateTime  @default(now())
+
+  @@index([productId])
+}
+
+/// Ürün görseli embedding'i (pgvector yerine JSON dizi; benzerlik uygulama içinde kosinüsle hesaplanır).
+model DmProductEmbedding {
+  id        String    @id @default(cuid())
+  productId String
+  product   DmProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  model     String
+  vector    Json
+  createdAt DateTime  @default(now())
+
+  @@unique([productId, imageUrl, model])
+}
+
+/// Takip mesajı (yalnızca kararsız kalan konuşmalar için, kişi başına en fazla 1).
+model DmFollowUp {
+  id             String @id @default(cuid())
+  clientId       String
+  client         Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   DmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  reason         String?
+  text           String
+  scheduledAt    DateTime
+  /// Kişinin 24 saat penceresinin kapanacağı an.
+  windowEndsAt   DateTime
+  status         DmFollowUpStatus @default(PENDING_APPROVAL)
+  decidedByName  String?
+  decidedAt      DateTime?
+  sentAt         DateTime?
+  messageId      String?
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([clientId, status])
+  @@index([status, scheduledAt])
+}
+
+/// Sesli kurulum görüşmesi ve analizi (çıktı admin onaylamadan canlıya geçmez).
+model DmOnboardingSession {
+  id           String @id @default(cuid())
+  clientId     String
+  client       Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  status       DmOnboardingStatus @default(DRAFT)
+  /// Admin tarafından önceden girilir (asistan işletme sahibine adıyla hitap eder).
+  ownerName    String?
+  businessName String?
+  transcript   Json?
+  /// Görüşmede toplanan alanlar (kontrol listesi).
+  fields       Json?
+  durationSec  Int?
+  /// Görüşme sonrası yüklenen dosyalar (StoredFile adresleri JSON).
+  files        Json?
+  /// Analiz çıktısı: işletme profili, önerilen modüller, konuşma tarzı.
+  analysis     Json?
+  promptDraft  String?
+  startedByName String?
+  decidedByName String?
+  decidedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+/// Her AI çağrısının kaydı (maliyet takibi; müşteri bazında aylık maliyet / kredi karşılaştırması).
+model DmAiUsage {
+  id           String   @id @default(cuid())
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// TEXT_REPLY | MEDIA | CLASSIFY | SUMMARY | ONBOARDING | EMBEDDING | TEST
+  kind         String
+  provider     String
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Decimal  @default(0)
+  messageId    String?
+  createdAt    DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([createdAt])
+}
+
+/// Başarısız AI çağrıları (sağlayıcı sağlığı: ödeme alınamadı, anahtar geçersiz, limit…). Admin "AI maliyeti" ekranı.
+model DmAiFailure {
+  id        String   @id @default(cuid())
+  clientId  String?
+  provider  String
+  model     String
+  kind      String
+  /// BILLING (ödeme / bakiye) | KEY (anahtar geçersiz) | RATE (limit / yoğunluk) | OTHER
+  code      String
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([createdAt])
 }

@@ -4,6 +4,19 @@ import { prisma } from "@/lib/prisma";
 import { isDriveConfigured } from "@/lib/drive";
 import { ChangePasswordForm } from "@/app/(app)/profil/ChangePasswordForm";
 import { DriveSettings } from "./DriveSettings";
+import { DmGlobalSettings } from "@/components/dm/settings/DmGlobalSettings";
+import { getDmApp, isDmMetaConnected } from "@/lib/dm/metaDm";
+import { aiKeyStatus, getAiDefaults } from "@/lib/dm/ai/settings";
+
+async function workerHealth(): Promise<{ ok: boolean; mode?: string; error?: string }> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${process.env.DM_WORKER_PORT ?? 3005}/health`, { cache: "no-store", signal: AbortSignal.timeout(2000) });
+    const j = (await res.json()) as { ok?: boolean; mode?: string };
+    return { ok: !!j.ok, mode: j.mode };
+  } catch {
+    return { ok: false, error: "erişilemiyor" };
+  }
+}
 
 export default async function AyarlarPage() {
   const session = await auth();
@@ -12,9 +25,14 @@ export default async function AyarlarPage() {
   const storageDriver = process.env.STORAGE_DRIVER ?? "local";
   const maxUploadMb = process.env.MAX_UPLOAD_SIZE_MB ?? "2048";
   const smtpConfigured = Boolean(process.env.SMTP_HOST);
-  const [driveConnected, driveFileCount] = await Promise.all([
+  const [driveConnected, driveFileCount, dmMeta, dmKeys, dmDefaults, dmWorker, dmApp] = await Promise.all([
     isDriveConfigured(),
     prisma.storedFile.count(),
+    isDmMetaConnected(),
+    aiKeyStatus(),
+    getAiDefaults(),
+    workerHealth(),
+    getDmApp(),
   ]);
 
   return (
@@ -50,6 +68,17 @@ export default async function AyarlarPage() {
         connected={driveConnected}
         defaultRootId="0ADolc626LRfEUk9PVA"
         fileCount={driveFileCount}
+      />
+
+      <DmGlobalSettings
+        metaConnected={dmMeta}
+        appConfigured={Boolean(dmApp.appId && dmApp.appSecret)}
+        appId={dmApp.appId}
+        verifyConfigured
+        webhookUrl={`${process.env.APP_URL ?? "https://sistem.2keyidea.com"}/api/dm/webhook`}
+        worker={dmWorker}
+        keys={dmKeys}
+        defaults={dmDefaults}
       />
 
       <div className="rounded-xl border border-(--color-border) bg-(--color-surface) p-5">

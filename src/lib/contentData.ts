@@ -40,7 +40,12 @@ export function parseMonthParams(y?: string, m?: string) {
   return ok ? { year, month } : { year: today.year, month: today.month };
 }
 
-export async function loadContent(clientId: string, year: number, month: number) {
+/**
+ * forClient: müşteri paneli; henüz müşteriye açılmamış (DRAFT) teslimler gösterilmez.
+ * hideBrief: içeriğini bizim yazdığımız müşteri; içerik metni, not ve referans dosyaları gönderilmez
+ * (müşteri sadece başlığı, hazır görseli ve caption'ı görür).
+ */
+export async function loadContent(clientId: string, year: number, month: number, opts: { forClient?: boolean; hideBrief?: boolean } = {}) {
   const [items, docs] = await Promise.all([
     prisma.contentItem.findMany({
       where: { clientId, year, month },
@@ -50,23 +55,29 @@ export async function loadContent(clientId: string, year: number, month: number)
         deliveryFiles: { orderBy: { position: "asc" } },
       },
     }),
-    prisma.contentDoc.findMany({ where: { clientId, year, month }, orderBy: { updatedAt: "desc" } }),
+    opts.hideBrief ? Promise.resolve([]) : prisma.contentDoc.findMany({ where: { clientId, year, month }, orderBy: { updatedAt: "desc" } }),
   ]);
   // "İş olarak ekle" ile açılan iş hâlâ var mı (silinmişse tekrar eklenebilsin).
   const taskIds = items.map((i) => i.taskId).filter((t): t is string => !!t);
   const liveTasks = taskIds.length > 0 ? await prisma.task.findMany({ where: { id: { in: taskIds } }, select: { id: true } }) : [];
   const liveTaskIds = new Set(liveTasks.map((t) => t.id));
-  const itemRows: ItemRow[] = items.map((i) => ({
-    id: i.id,
-    title: i.title,
-    details: i.details ?? "",
-    note: i.note ?? "",
-    contentType: i.contentType ?? "",
-    inJob: !!i.taskId && liveTaskIds.has(i.taskId),
-    files: i.files.map((f) => ({ id: f.id, url: f.url, name: f.name })),
-    createdByName: i.createdByName,
-    delivery: toDeliveryInfo(i),
-  }));
+  const itemRows: ItemRow[] = items.map((i) => {
+    const delivery = opts.forClient && i.deliveryStatus === "DRAFT" ? null : toDeliveryInfo(i);
+    return {
+      id: i.id,
+      title: i.title,
+      details: opts.hideBrief ? "" : i.details ?? "",
+      note: opts.hideBrief ? "" : i.note ?? "",
+      contentType: i.contentType ?? "",
+      inJob: !!i.taskId && liveTaskIds.has(i.taskId),
+      files: opts.hideBrief ? [] : i.files.map((f) => ({ id: f.id, url: f.url, name: f.name })),
+      createdByName: opts.hideBrief ? null : i.createdByName,
+      caption: i.caption ?? "",
+      shareDate: i.shareDate ?? "",
+      shareTime: i.shareTime ?? "",
+      delivery: delivery ? { ...delivery, caption: i.caption } : null,
+    };
+  });
   const docRows: DocRow[] = docs.map((d) => ({
     id: d.id,
     title: d.title,

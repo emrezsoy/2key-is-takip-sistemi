@@ -12,6 +12,7 @@ import {
 import { CONTENT_TYPES, CONTENT_TYPE_LABEL } from "@/lib/contentTypes";
 import { monthTitle } from "@/lib/portalText";
 import { DeliveryBox, type DeliveryInfo } from "@/components/delivery/DeliveryBox";
+import { bulkScheduleContentOnMeta, type BulkScheduleResult } from "@/lib/actions/metaSchedule";
 import { FileDropZone } from "@/components/ui/FileDropZone";
 import { UploadBar } from "@/components/ui/UploadBar";
 import { uploadWithProgress, type UploadProgress } from "@/lib/useUploader";
@@ -28,6 +29,10 @@ export type ItemRow = {
   inJob: boolean;
   files: RefFile[];
   createdByName: string | null;
+  /** Paylaşım metni ve planlanan paylaşım günü / saati (ekip yazar). */
+  caption: string;
+  shareDate: string;
+  shareTime: string;
   /** "Tamamlanan" sütunu: ekibin gönderdiği teslim (elle düzenlenemez). */
   delivery: DeliveryInfo | null;
 };
@@ -44,9 +49,12 @@ type Row = {
   inJob: boolean;
   files: RefFile[];
   createdByName: string | null;
+  caption: string;
+  shareDate: string;
+  shareTime: string;
   delivery: DeliveryInfo | null;
   /** Sunucuya son kaydedilen değerler (değişiklik var mı diye karşılaştırmak için). */
-  saved: { title: string; details: string; note: string; contentType: string };
+  saved: { title: string; details: string; note: string; contentType: string; caption: string; shareDate: string; shareTime: string };
   busy: boolean;
   error: string | null;
 };
@@ -61,8 +69,11 @@ const toRow = (i: ItemRow): Row => ({
   inJob: i.inJob,
   files: i.files,
   createdByName: i.createdByName,
+  caption: i.caption,
+  shareDate: i.shareDate,
+  shareTime: i.shareTime,
   delivery: i.delivery,
-  saved: { title: i.title, details: i.details, note: i.note, contentType: i.contentType },
+  saved: { title: i.title, details: i.details, note: i.note, contentType: i.contentType, caption: i.caption, shareDate: i.shareDate, shareTime: i.shareTime },
   busy: false,
   error: null,
 });
@@ -84,6 +95,7 @@ export function ContentTable({
   canSendCalendar = false,
   canClearDelivery = false,
   clientView = false,
+  briefHidden = false,
 }: {
   clientId: string;
   year: number;
@@ -102,7 +114,11 @@ export function ContentTable({
   canClearDelivery?: boolean;
   /** Müşteri paneli: iş olarak eklenmiş (işleme alınmış) satırlar artık değiştirilemez. */
   clientView?: boolean;
+  /** İçeriğini bizim yazdığımız müşteri: içerik detayı, referans ve not sütunları gösterilmez; sadece hazır çalışma ve caption. */
+  briefHidden?: boolean;
 }) {
+  // Caption ve paylaşım tarihi/saati sadece ekip tarafında düzenlenir.
+  const teamFields = !clientView;
   const [rows, setRows] = useState<Row[]>(() => items.map(toRow));
   const [seenItems, setSeenItems] = useState(items);
   const counter = useRef(0);
@@ -138,6 +154,28 @@ export function ContentTable({
     },
   };
   const [calendarItem, setCalendarItem] = useState<{ itemId: string; files: { url: string; name: string }[] } | null>(null);
+  // Meta'da toplu planlama: müşterinin onayladığı ve paylaşım günü/saati girilmiş satırlar seçilebilir.
+  const bulkEnabled = teamFields && canSendCalendar;
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkScheduleResult | null>(null);
+  const schedulable = (r: { id: string | null; delivery: DeliveryInfo | null; shareDate: string; shareTime: string }) =>
+    !!r.id && r.delivery?.status === "APPROVED" && !!r.shareDate && !!r.shareTime;
+  const runBulk = async () => {
+    if (picked.length === 0 || bulkBusy) return;
+    if (!window.confirm(`${picked.length} içerik kayıtlı tarih ve saatlerinde Meta'da (Instagram / Facebook) planlansın mı?`)) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const r = await bulkScheduleContentOnMeta(picked);
+      setBulkResult(r);
+      setPicked((cur) => cur.filter((id) => !r.some((x) => x.itemId === id && x.ok)));
+    } catch (e) {
+      setBulkResult([{ itemId: "", title: "", ok: false, message: e instanceof Error ? e.message : "Planlanamadı." }]);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   // Sunucudan başka biri tarafından eklenen yeni satırları, yerel düzenlemeleri bozmadan listeye kat.
   if (items !== seenItems) {
@@ -171,8 +209,11 @@ export function ContentTable({
         inJob: false,
         files: [],
         createdByName: null,
+        caption: "",
+        shareDate: "",
+        shareTime: "",
         delivery: null,
-        saved: { title: "", details: "", note: "", contentType: "" },
+        saved: { title: "", details: "", note: "", contentType: "", caption: "", shareDate: "", shareTime: "" },
         busy: false,
         error: null,
       },
@@ -184,7 +225,10 @@ export function ContentTable({
       row.title !== row.saved.title ||
       row.details !== row.saved.details ||
       row.note !== row.saved.note ||
-      row.contentType !== row.saved.contentType;
+      row.contentType !== row.saved.contentType ||
+      row.caption !== row.saved.caption ||
+      row.shareDate !== row.saved.shareDate ||
+      row.shareTime !== row.saved.shareTime;
     if (!dirty) return;
     if (!row.title.trim()) {
       // Başlıksız satır kaydedilemez: sessizce atlamak yerine kullanıcıyı uyar.
@@ -194,22 +238,29 @@ export function ContentTable({
     }
     patch(row.key, { busy: true, error: null });
     try {
-      const fields = { title: row.title, details: row.details, note: row.note, contentType: row.contentType };
+      const fields = {
+        title: row.title,
+        details: row.details,
+        note: row.note,
+        contentType: row.contentType,
+        ...(teamFields ? { caption: row.caption, shareDate: row.shareDate, shareTime: row.shareTime } : {}),
+      };
+      const savedNext = { ...row.saved, title: row.title, details: row.details, note: row.note, contentType: row.contentType, ...(teamFields ? { caption: row.caption, shareDate: row.shareDate, shareTime: row.shareTime } : {}) };
       if (row.id) {
         await updateContentItem(row.id, fields);
-        patch(row.key, { busy: false, saved: { ...fields } });
+        patch(row.key, { busy: false, saved: savedNext });
       } else {
         const inflight = creating.current.get(row.key);
         if (inflight) {
           // Aynı satır zaten oluşturuluyor (ör. başlıktan çıkış + tür seçimi): oluşunca güncel değerlerle güncelle.
           const id = await inflight;
           await updateContentItem(id, fields);
-          patch(row.key, { id, busy: false, saved: { ...fields } });
+          patch(row.key, { id, busy: false, saved: savedNext });
         } else {
           const created = createContentItem(clientId, year, month, fields);
           creating.current.set(row.key, created);
           const id = await created;
-          patch(row.key, { id, busy: false, saved: { ...fields } });
+          patch(row.key, { id, busy: false, saved: savedNext });
         }
       }
     } catch (e) {
@@ -298,21 +349,62 @@ export function ContentTable({
     setRows((cur) => cur.filter((r) => r.key !== row.key));
   };
 
-  const GRID = "xl:grid-cols-[2rem_minmax(0,1.1fr)_8rem_minmax(0,1.7fr)_10rem_minmax(0,1fr)_12.5rem_4.5rem]";
+  const GRID = briefHidden
+    ? "xl:grid-cols-[2rem_minmax(0,1.4fr)_9rem_minmax(0,2fr)]"
+    : teamFields
+      ? "xl:grid-cols-[2rem_minmax(0,1fr)_7.5rem_minmax(0,1.5fr)_9rem_minmax(0,0.9fr)_13rem_12.5rem_4.5rem]"
+      : "xl:grid-cols-[2rem_minmax(0,1.1fr)_8rem_minmax(0,1.7fr)_10rem_minmax(0,1fr)_12.5rem_4.5rem]";
   const mobileLabel = "mb-0.5 block px-2 text-[11px] font-semibold uppercase text-(--color-text-muted) xl:hidden";
 
+  const eligible = rows.filter(schedulable).map((r) => r.id as string);
   return (
     <div className="space-y-3">
+      {bulkEnabled && eligible.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-(--color-border) bg-(--color-surface) px-3 py-2 text-sm">
+          <label className="flex items-center gap-1.5 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={eligible.length > 0 && eligible.every((id) => picked.includes(id))}
+              onChange={(e) => setPicked(e.target.checked ? eligible : [])}
+            />
+            Onaylı ve tarihli içeriklerin tümü ({eligible.length})
+          </label>
+          <button
+            type="button"
+            disabled={picked.length === 0 || bulkBusy}
+            onClick={() => void runBulk()}
+            className="ml-auto flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {bulkBusy ? <Loader2 size={13} className="animate-spin" /> : <CalendarPlus size={13} />}
+            Meta&apos;da toplu planla{picked.length > 0 ? ` (${picked.length})` : ""}
+          </button>
+          {bulkResult && (
+            <ul className="w-full space-y-0.5 text-xs">
+              {bulkResult.map((r, i) => (
+                <li key={i} className={r.ok ? "text-emerald-600 dark:text-emerald-400" : "text-brand-600"}>
+                  {r.title ? `${r.title}: ` : ""}
+                  {r.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="overflow-hidden rounded-xl border border-(--color-border) bg-(--color-surface)">
         <div className={`hidden gap-2 bg-(--color-surface-muted) px-3 py-3 text-xs font-semibold uppercase text-(--color-text-muted) xl:grid ${GRID}`}>
           <span>#</span>
           <span>Başlık</span>
           <span>İçerik türü</span>
-          <span>İçerik detayları</span>
-          <span>Referans görseller / videolar</span>
-          <span>Not</span>
-          <span>Tamamlanan</span>
-          <span />
+          {!briefHidden && (
+            <>
+              <span>İçerik detayları</span>
+              <span>Referans görseller / videolar</span>
+              <span>Not</span>
+            </>
+          )}
+          {teamFields && <span>Paylaşım ve caption</span>}
+          <span>{briefHidden ? "Hazırlanan çalışma" : "Tamamlanan"}</span>
+          {!briefHidden && <span />}
         </div>
 
         <div className="divide-y divide-(--color-border)">
@@ -322,7 +414,15 @@ export function ContentTable({
             return (
             <div key={row.key} className={`grid grid-cols-1 gap-2 p-3 xl:items-start ${GRID} ${row.busy ? "opacity-70" : ""}`}>
               <div className="flex items-center justify-between xl:block">
-                <span className="text-xs font-semibold text-(--color-text-muted)">
+                <span className="flex items-center gap-1 text-xs font-semibold text-(--color-text-muted)">
+                  {bulkEnabled && schedulable(row) && (
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(row.id as string)}
+                      onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, row.id as string] : cur.filter((x) => x !== row.id)))}
+                      aria-label="Meta'da toplu planlama için seç"
+                    />
+                  )}
                   <span className="xl:hidden">Satır </span>
                   {idx + 1}
                 </span>
@@ -398,6 +498,7 @@ export function ContentTable({
                 )}
               </div>
 
+              {!briefHidden && (<>
               <div className="min-w-0" {...lk}>
                 <span className={mobileLabel}>İçerik detayları</span>
                 {canEdit ? (
@@ -485,6 +586,43 @@ export function ContentTable({
                   <p className="whitespace-pre-wrap break-words px-2 py-1.5 text-(--color-text-muted)">{row.note}</p>
                 )}
               </div>
+              </>)}
+
+              {teamFields && (
+                <div className="min-w-0 space-y-1.5">
+                  <span className={mobileLabel}>Paylaşım ve caption</span>
+                  <div className="flex gap-1">
+                    <input
+                      type="date"
+                      value={row.shareDate}
+                      onChange={(e) => {
+                        const next = { ...row, shareDate: e.target.value };
+                        patch(row.key, { shareDate: e.target.value });
+                        void commit(next);
+                      }}
+                      aria-label="Paylaşım tarihi"
+                      className={`${cell} border-(--color-border) px-1.5 text-xs`}
+                    />
+                    <input
+                      type="time"
+                      value={row.shareTime}
+                      onChange={(e) => patch(row.key, { shareTime: e.target.value })}
+                      onBlur={() => void commit(row)}
+                      aria-label="Paylaşım saati"
+                      className={`${cell} w-[5.5rem] shrink-0 border-(--color-border) px-1.5 text-xs`}
+                    />
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={row.caption}
+                    maxLength={2200}
+                    onChange={(e) => patch(row.key, { caption: e.target.value })}
+                    onBlur={() => void commit(row)}
+                    placeholder="Caption (isteğe bağlı)"
+                    className={`${cell} border-(--color-border) text-xs`}
+                  />
+                </div>
+              )}
 
               <div className="min-w-0 px-2 xl:px-0">
                 <span className={mobileLabel}>Tamamlanan</span>
@@ -519,7 +657,7 @@ export function ContentTable({
                 />
               </div>
 
-              <div className="hidden flex-col items-end gap-2 xl:flex">
+              {!briefHidden && <div className="hidden flex-col items-end gap-2 xl:flex">
                 {canEdit && (
                   <button
                     type="button"
@@ -531,7 +669,7 @@ export function ContentTable({
                   </button>
                 )}
                 {jobButton(row, false)}
-              </div>
+              </div>}
             </div>
             );
           })}

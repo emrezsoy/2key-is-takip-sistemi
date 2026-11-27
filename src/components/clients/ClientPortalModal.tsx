@@ -11,6 +11,7 @@ import {
   setClientLoginActive,
 } from "@/lib/actions/clientAccounts";
 import { NOTIFY_LABEL } from "@/lib/portalText";
+import { saveClientDmServices } from "@/lib/actions/dmCredits";
 
 export type PortalLogin = {
   id: string;
@@ -42,6 +43,7 @@ export function ClientPortalModal({
   socialManaged,
   contentEditable,
   shareRevisionEnabled,
+  dm,
 }: {
   clientId: string;
   clientName: string;
@@ -53,6 +55,8 @@ export function ClientPortalModal({
   socialManaged: boolean;
   contentEditable: boolean;
   shareRevisionEnabled: boolean;
+  /** Mesaj Otomasyonu hizmeti ve modülleri. */
+  dm?: { managed: boolean; appointment: boolean; products: boolean; media: boolean };
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [pending, startTransition] = useTransition();
@@ -70,6 +74,10 @@ export function ClientPortalModal({
   const [socialOn, setSocialOn] = useState(socialManaged);
   const [contentEditOn, setContentEditOn] = useState(contentEditable);
   const [revisionOn, setRevisionOn] = useState(shareRevisionEnabled);
+  const [dmOn, setDmOn] = useState(dm?.managed ?? false);
+  const [dmAppointment, setDmAppointment] = useState(dm?.appointment ?? false);
+  const [dmProducts, setDmProducts] = useState(dm?.products ?? false);
+  const [dmMedia, setDmMedia] = useState(dm?.media ?? true);
 
   const run = (fn: () => Promise<void>, ok?: string) => {
     setError(null);
@@ -280,6 +288,52 @@ export function ClientPortalModal({
               >
                 Hizmetleri kaydet
               </button>
+            </section>
+
+            <section className="space-y-2 rounded-lg border border-(--color-border) p-3">
+              <h3 className="text-sm font-bold">Mesaj Otomasyonu</h3>
+              <p className="text-xs text-(--color-text-muted)">
+                Instagram ve Facebook mesajlarını AI ile yanıtlama. Açılınca müşteri panelinde &quot;Mesajlar&quot; bölümü aktif olur; kredi,
+                ödeme, model ve prompt ayarları Mesaj Otomasyonu sayfasındadır.
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={dmOn} onChange={(e) => setDmOn(e.target.checked)} className="h-4 w-4" />
+                Mesaj Otomasyonu hizmeti
+              </label>
+              <div className={`ml-6 space-y-2 ${dmOn ? "" : "opacity-50"}`}>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={dmOn && dmMedia} disabled={!dmOn} onChange={(e) => setDmMedia(e.target.checked)} className="h-4 w-4" />
+                  Görsel / video / reklam analizi
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={dmOn && dmAppointment} disabled={!dmOn} onChange={(e) => setDmAppointment(e.target.checked)} className="h-4 w-4" />
+                  Randevu modülü
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={dmOn && dmProducts} disabled={!dmOn} onChange={(e) => setDmProducts(e.target.checked)} className="h-4 w-4" />
+                  Ürün / stok modülü
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    run(
+                      () => saveClientDmServices({ clientId, dmManaged: dmOn, appointment: dmOn && dmAppointment, products: dmOn && dmProducts, media: dmMedia }),
+                      "Mesaj Otomasyonu ayarı kaydedildi."
+                    )
+                  }
+                  className="rounded-lg border border-(--color-border) px-4 py-2 text-sm font-semibold hover:bg-(--color-surface-muted) disabled:opacity-60"
+                >
+                  Kaydet
+                </button>
+                {dm?.managed && (
+                  <a href={`/mesaj-otomasyonu/${encodeURIComponent(clientId)}`} className="text-xs font-semibold text-brand-600 hover:underline">
+                    Mesaj Otomasyonu sayfasını aç →
+                  </a>
+                )}
+              </div>
             </section>
 
             <section className="space-y-3">

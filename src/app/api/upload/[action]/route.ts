@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { addTaskAttachments, createClientJob } from "@/lib/actions/clientJobs";
-import { createTask, replaceSubmissionFiles, submitTaskFile } from "@/lib/actions/tasks";
+import { createTask, replaceSubmissionFiles, reviseTaskAnnotated, submitTaskFile } from "@/lib/actions/tasks";
 import { addContentItemFiles, uploadContentImage } from "@/lib/actions/content";
 import { createClientRequest } from "@/lib/actions/clientRequests";
 import { createSharePost, updateSharePost } from "@/lib/actions/sharePosts";
@@ -37,6 +37,7 @@ const HANDLERS: Record<UploadAction, Handler> = {
   updateSharePost: (a, fd) => updateSharePost(str(a[0]), fd),
   reviseDelivery: (a, fd) => reviseDelivery(target(a[0]), fd),
   teamReviseDelivery: (a, fd) => teamReviseDelivery(str(a[0]), fd),
+  reviseTaskAnnotated: (a, fd) => reviseTaskAnnotated(str(a[0]), fd),
   createProposal: (_a, fd) => createProposal(fd),
   addProposalFile: (a, fd) => addProposalFile(str(a[0]), fd),
   updateAvatar: (_a, fd) => updateAvatar(fd),

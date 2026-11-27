@@ -6,7 +6,8 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatDate, STATUS_LABEL, URGENCY_LABEL, URGENCY_STYLE } from "@/lib/format";
-import { approveTask, reorderSubmissions, reviseTask, updateTaskStatus } from "@/lib/actions/tasks";
+import { approveTask, reorderSubmissions, reviseTask, setTaskCaption, updateTaskStatus } from "@/lib/actions/tasks";
+import { RevisionEditor } from "@/components/delivery/RevisionEditor";
 import { updateJob, deleteJob } from "@/lib/actions/clientJobs";
 import { deleteRequestFiles, deleteSubmissionFiles, deleteTaskReferenceFiles } from "@/lib/actions/fileRemoval";
 import { joinJobText } from "@/lib/jobText";
@@ -236,6 +237,14 @@ export function TaskDetailsDialog({
   const [error, setError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [reviseNote, setReviseNote] = useState("");
+  // Çizimli revize (müşteri revizesiyle aynı ekran): teslimde görsel/video varsa bu açılır.
+  const annotRef = useRef<HTMLDialogElement>(null);
+  const [annotating, setAnnotating] = useState(false);
+  const revisedRef = useRef(false);
+  const revUp = useUploader();
+  const [caption, setCaption] = useState(task.caption ?? "");
+  const [captionSaved, setCaptionSaved] = useState(task.caption ?? "");
+  const [captionMsg, setCaptionMsg] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const canSendToCalendar = useCanEditShareCalendar() || canSend;
@@ -346,7 +355,29 @@ export function TaskDetailsDialog({
   const openRevise = () => {
     setReviseNote("");
     setError(null);
+    if (sendable.length > 0) {
+      setAnnotating(true);
+      annotRef.current?.showModal();
+      return;
+    }
     reviseDialogRef.current?.showModal();
+  };
+  const closeAnnot = () => {
+    annotRef.current?.close();
+    setAnnotating(false);
+  };
+  const saveCaption = () => {
+    if (caption === captionSaved) return;
+    setCaptionMsg(null);
+    startTransition(async () => {
+      try {
+        await setTaskCaption(task.id, caption);
+        setCaptionSaved(caption);
+        setCaptionMsg("Kaydedildi.");
+      } catch (e) {
+        setCaptionMsg(e instanceof Error ? e.message : "Kaydedilemedi.");
+      }
+    });
   };
 
   const handleRevise = () => {
@@ -850,6 +881,8 @@ export function TaskDetailsDialog({
                     )
                   )}
                   {canSendToCalendar && (<>
+                  {/* İçerik listesinden gelen iş takvime değil, onaylanınca kendi içerik satırına gider. */}
+                  {!task.fromContent && (
                   <button
                     type="button"
                     disabled={selectedSendable.length === 0}
@@ -859,6 +892,7 @@ export function TaskDetailsDialog({
                     <CalendarPlus size={13} />
                     Paylaşım takvimine gönder
                   </button>
+                  )}
                   {clientName && (
                     <button
                       type="button"
@@ -1047,6 +1081,28 @@ export function TaskDetailsDialog({
           </div>
         )}
 
+        {task.status !== "TODO" && (role === "admin" || canManage || canWork) && (
+          <div className="mt-5 space-y-1.5 rounded-xl border border-(--color-border) p-3">
+            <div className="flex items-center justify-between">
+              <label htmlFor={`caption-${task.id}`} className="text-xs font-semibold uppercase text-(--color-text-muted)">
+                Caption (paylaşım metni)
+              </label>
+              <span className="text-[10px] text-(--color-text-muted)">{caption.length}/2200 · isteğe bağlı</span>
+            </div>
+            <textarea
+              id={`caption-${task.id}`}
+              rows={3}
+              maxLength={2200}
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              onBlur={saveCaption}
+              placeholder="Paylaşımda kullanılacak metin. İçerik listesine teslimle birlikte gider; boş da bırakabilirsiniz."
+              className="w-full rounded-lg border border-(--color-border) bg-(--color-bg) px-3 py-2 text-sm outline-none focus:border-brand-500"
+            />
+            {captionMsg && <p className="text-[11px] text-(--color-text-muted)">{captionMsg}</p>}
+          </div>
+        )}
+
         {canReviseLater && (
           <div className="mt-5 flex items-center justify-end gap-3">
             <p className="text-[11px] text-(--color-text-muted)">İşte hata varsa müşteriye gitmeden revize ver.</p>
@@ -1062,6 +1118,11 @@ export function TaskDetailsDialog({
           </div>
         )}
 
+        {canReview && task.fromContent && (
+          <p className="mt-5 text-right text-[11px] text-(--color-text-muted)">
+            Onaylayınca teslim görselleri ve caption bu işin içerik satırına gider; müşteriye içerik listesinden &quot;Müşteriye gönder&quot; ile açarsınız.
+          </p>
+        )}
         {canReview && (
           <div className="mt-5 flex justify-end gap-2">
             <button
@@ -1153,6 +1214,35 @@ export function TaskDetailsDialog({
             </button>
           </div>
         </div>
+      </dialog>
+
+      <dialog
+        ref={annotRef}
+        onClose={() => setAnnotating(false)}
+        data-confirm-close=""
+        className="m-auto w-[calc(100%-1.5rem)] max-w-3xl rounded-xl border border-(--color-border) bg-(--color-surface) p-0 text-(--color-text) backdrop:bg-black/60"
+      >
+        {annotating && (
+          <RevisionEditor
+            title={task.title}
+            subtitle={clientName ?? undefined}
+            images={sendable.map((f, i) => ({ id: `${i}-${f.url}`, url: f.url, mediaType: VIDEO_EXT.test(f.name) ? "VIDEO" : "IMAGE" }))}
+            progress={revUp.progress}
+            team
+            submit={async (fd) => {
+              await revUp.run("reviseTaskAnnotated", [task.id], fd);
+              revisedRef.current = true;
+            }}
+            onClose={() => {
+              closeAnnot();
+              // Revize gönderildiyse iş kartı da kapanır (iş "Devam ediyor"a döndü); vazgeçildiyse kart açık kalır.
+              if (revisedRef.current) {
+                revisedRef.current = false;
+                onClose();
+              }
+            }}
+          />
+        )}
       </dialog>
     </dialog>
   );

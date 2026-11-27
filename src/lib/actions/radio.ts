@@ -5,7 +5,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import {
   RADIO_MAX_QUEUED_PER_USER,
-  RADIO_SKIP_VOTES,
   RadioError,
   cleanupRadioHistory,
   ensureRadioPlaying,
@@ -55,44 +54,27 @@ export async function addRadioTrack(link: string): Promise<RadioResult> {
   }
 }
 
-/** Sıradaki şarkıyı kaldırır (yönetici ya da ekleyen kişi). */
+/** Sıradaki şarkıyı kaldırır (ekipteki herkes). */
 export async function removeRadioTrack(trackId: string): Promise<RadioResult> {
   const user = await teamUser();
   if (!user) return { ok: false, error: "Yetkiniz yok." };
   const track = await prisma.radioTrack.findUnique({ where: { id: trackId } });
   if (!track || track.status !== "QUEUED") return { ok: false, error: "Şarkı artık sırada değil." };
-  if (user.role !== "ADMIN" && track.addedById !== user.id) return { ok: false, error: "Sadece kendi eklediğin şarkıyı kaldırabilirsin." };
   await prisma.radioTrack.deleteMany({ where: { id: trackId, status: "QUEUED" } });
   revalidatePath("/radyo");
   return { ok: true };
 }
 
-/** Çalan şarkıyı geçer: yönetici ve ekleyen kişi doğrudan, diğerleri oy verir. */
+/** Çalan şarkıyı geçer: ekipteki herkes oy beklemeden geçebilir. */
 export async function skipRadioTrack(trackId: string): Promise<RadioResult> {
   const user = await teamUser();
   if (!user) return { ok: false, error: "Yetkiniz yok." };
   const track = await prisma.radioTrack.findUnique({ where: { id: trackId } });
   if (!track || track.status !== "PLAYING") return { ok: false, error: "Bu şarkı artık çalmıyor." };
 
-  if (user.role === "ADMIN" || track.addedById === user.id) {
-    await finishRadioTrack(trackId, "SKIPPED");
-    revalidatePath("/radyo");
-    return { ok: true, message: "Şarkı geçildi." };
-  }
-
-  await prisma.radioSkipVote.upsert({
-    where: { trackId_userId: { trackId, userId: user.id } },
-    create: { trackId, userId: user.id },
-    update: {},
-  });
-  const votes = await prisma.radioSkipVote.count({ where: { trackId } });
-  if (votes >= RADIO_SKIP_VOTES) {
-    await finishRadioTrack(trackId, "SKIPPED");
-    revalidatePath("/radyo");
-    return { ok: true, message: `${RADIO_SKIP_VOTES} oy toplandı, şarkı geçildi.` };
-  }
+  await finishRadioTrack(trackId, "SKIPPED");
   revalidatePath("/radyo");
-  return { ok: true, message: `Geç oyun alındı (${votes}/${RADIO_SKIP_VOTES}).` };
+  return { ok: true, message: "Şarkı geçildi." };
 }
 
 async function adminUser() {
@@ -101,14 +83,14 @@ async function adminUser() {
 }
 
 export async function setRadioPaused(paused: boolean): Promise<RadioResult> {
-  if (!(await adminUser())) return { ok: false, error: "Sadece yönetici duraklatabilir." };
+  if (!(await teamUser())) return { ok: false, error: "Yetkiniz yok." };
   await setRadioPausedSetting(paused);
   revalidatePath("/radyo");
   return { ok: true };
 }
 
 export async function setRadioVolume(volume: number): Promise<RadioResult> {
-  if (!(await adminUser())) return { ok: false, error: "Sadece yönetici ses ayarlayabilir." };
+  if (!(await teamUser())) return { ok: false, error: "Yetkiniz yok." };
   if (!Number.isFinite(volume)) return { ok: false, error: "Geçersiz ses seviyesi." };
   await setRadioVolumeSetting(volume);
   revalidatePath("/radyo");

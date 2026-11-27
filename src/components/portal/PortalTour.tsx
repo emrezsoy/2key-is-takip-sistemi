@@ -18,7 +18,7 @@ type Step = {
 export const TOUR_EVENT = "portal-tour-start";
 const INSTALL_SEEN_KEY = "portal-install-popup-seen";
 
-function buildSteps(o: { social: boolean; ads: boolean }): Step[] {
+function buildSteps(o: { social: boolean; ads: boolean; dm?: boolean }): Step[] {
   const s: Step[] = [
     {
       id: "hos",
@@ -76,6 +76,15 @@ function buildSteps(o: { social: boolean; ads: boolean }): Step[] {
       body: "Hangi gün hangi içeriğin paylaşılacağını görseliyle birlikte takvimde görürsünüz; paylaşılanlar işaretlenir. Bu bölüm de sadece görüntüleme içindir.",
     });
   }
+  if (o.dm) {
+    s.push({
+      id: "mesajlar",
+      target: "/panel/mesajlar",
+      href: "/panel/mesajlar",
+      title: "Mesajlar",
+      body: "Instagram ve Facebook mesajlarınızı AI asistanınız yanıtlar. Buradan tüm konuşmaları görür, istediğinizde devralıp kendiniz cevap verir, AI'ı açıp kapatır ve kalan kredinizi takip edersiniz.",
+    });
+  }
   s.push(
     {
       id: "odemeler",
@@ -105,10 +114,10 @@ function buildSteps(o: { social: boolean; ads: boolean }): Step[] {
 type Rect = { top: number; left: number; width: number; height: number };
 
 /** İlk giriş tanıtım turu: gerçek sayfaları sırayla açıp menüdeki öğeyi vurgular, konuşma balonuyla anlatır. */
-export function PortalTour({ autoStart, social, ads }: { autoStart: boolean; social: boolean; ads: boolean }) {
+export function PortalTour({ autoStart, social, ads, dm = false }: { autoStart: boolean; social: boolean; ads: boolean; dm?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
-  const steps = useMemo(() => buildSteps({ social, ads }), [social, ads]);
+  const steps = useMemo(() => buildSteps({ social, ads, dm }), [social, ads, dm]);
   const [open, setOpen] = useState(autoStart);
   const [idx, setIdx] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);

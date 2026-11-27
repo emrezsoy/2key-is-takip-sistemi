@@ -90,6 +90,12 @@ export default async function MusterilerPage() {
                       socialManaged={c.socialManaged}
                       contentEditable={c.contentEditable}
                       shareRevisionEnabled={c.shareRevisionEnabled}
+                      dm={{
+                        managed: c.dmManaged,
+                        appointment: c.dmModuleAppointment,
+                        products: c.dmModuleProducts,
+                        media: c.dmModuleMedia,
+                      }}
                     />
                     <ClientCredentialsModal
                       clientId={c.id}

@@ -24,6 +24,7 @@ export function ContentWorkspace({
   canSendCalendar = false,
   canClearDelivery = false,
   clientView = false,
+  briefHidden = false,
 }: {
   clientId: string;
   /** Ay gezintisi için sayfa adresi (ör. /panel/icerik). */
@@ -45,6 +46,8 @@ export function ContentWorkspace({
   canClearDelivery?: boolean;
   /** Müşteri paneli: işleme alınan (iş olarak eklenen) satırlar kilitlenir. */
   clientView?: boolean;
+  /** İçeriğini bizim yazdığımız müşteri: sadece hazır çalışma + caption; düz yazı sekmesi gösterilmez. */
+  briefHidden?: boolean;
 }) {
   const [tab, setTab] = useState<"table" | "docs">("table");
   const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
@@ -57,7 +60,7 @@ export function ContentWorkspace({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-lg bg-(--color-surface-muted) p-1 text-sm font-semibold">
+        {briefHidden ? <span /> : <div className="flex items-center gap-1 rounded-lg bg-(--color-surface-muted) p-1 text-sm font-semibold">
           <button
             type="button"
             onClick={() => setTab("table")}
@@ -72,7 +75,7 @@ export function ContentWorkspace({
           >
             <FileText size={14} /> Düz yazı ({docs.length})
           </button>
-        </div>
+        </div>}
 
         <div className="flex items-center gap-1">
           <Link
@@ -127,7 +130,7 @@ export function ContentWorkspace({
       )}
 
       {/* Ay değişince içerik yeniden kurulsun diye key kullanılıyor. */}
-      {tab === "table" ? (
+      {tab === "table" || briefHidden ? (
         <ContentTable
           key={`${clientId}-${year}-${month}`}
           clientId={clientId}
@@ -141,6 +144,7 @@ export function ContentWorkspace({
           canSendCalendar={canSendCalendar}
           canClearDelivery={canClearDelivery}
           clientView={clientView}
+          briefHidden={briefHidden}
         />
       ) : (
         <ContentDocs key={`${clientId}-${year}-${month}`} clientId={clientId} year={year} month={month} docs={docs} canEdit={canEdit} />

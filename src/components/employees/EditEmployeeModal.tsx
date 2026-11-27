@@ -7,6 +7,7 @@ import { ClientLeadPicker } from "./ClientLeadPicker";
 import { ShareAccessField } from "./ShareAccessField";
 import { AdPanelField } from "./AdPanelField";
 import { ProposalAccessField } from "./ProposalAccessField";
+import { DmAccessField } from "./DmAccessField";
 import { ContentAccessField } from "./ContentAccessField";
 
 type Option = { id: string; label: string };
@@ -35,6 +36,7 @@ export function EditEmployeeModal({
     adManageAccess: boolean;
     proposalAccess: boolean;
     contentAccess: boolean;
+    dmAccess: boolean;
     leadClientIds: string[];
   };
   supervisors: Option[];
@@ -221,6 +223,7 @@ export function EditEmployeeModal({
             {role !== "ADMIN" && <ShareAccessField defaultValue={user.shareCalendarAccess} />}
             {role !== "ADMIN" && <AdPanelField defaultChecked={user.adPanelAccess} manageDefault={user.adManageAccess} />}
             {role !== "ADMIN" && <ContentAccessField defaultChecked={user.contentAccess} />}
+            {role !== "ADMIN" && <DmAccessField defaultChecked={user.dmAccess} />}
             <ProposalAccessField defaultChecked={user.proposalAccess} />
 
             <label className="flex items-center gap-2 text-sm">

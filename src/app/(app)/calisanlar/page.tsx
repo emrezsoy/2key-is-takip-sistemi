@@ -128,6 +128,7 @@ export default async function CalisanlarPage() {
                           adManageAccess: u.adManageAccess,
                           proposalAccess: u.proposalAccess,
                           contentAccess: u.contentAccess,
+                          dmAccess: u.dmAccess,
                           leadClientIds: u.ledClients.map((c) => c.id),
                         }}
                         clients={clientOptions}

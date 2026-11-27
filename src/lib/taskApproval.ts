@@ -24,3 +24,10 @@ export async function loadClientApprovals(taskIds: string[]): Promise<Map<string
   }
   return out;
 }
+
+/** İçerik listesindeki bir satıra bağlı (oradan açılmış) işler. */
+export async function loadContentLinkedTasks(taskIds: string[]): Promise<Set<string>> {
+  if (taskIds.length === 0) return new Set();
+  const rows = await prisma.contentItem.findMany({ where: { taskId: { in: taskIds } }, select: { taskId: true } });
+  return new Set(rows.map((r) => r.taskId).filter((t): t is string => !!t));
+}

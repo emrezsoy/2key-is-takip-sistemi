@@ -7,8 +7,6 @@ import { prisma } from "@/lib/prisma";
 
 /** Bir kişinin aynı anda sırada bekleyebilecek en fazla şarkısı. */
 export const RADIO_MAX_QUEUED_PER_USER = 3;
-/** Çalan şarkıyı geçmek için gereken oy (yönetici ve şarkıyı ekleyen kişi oy beklemeden geçebilir). */
-export const RADIO_SKIP_VOTES = 3;
 /** TV bu süre içinde durum sormadıysa "bağlı değil" sayılır. */
 const TV_ONLINE_MS = 20_000;
 

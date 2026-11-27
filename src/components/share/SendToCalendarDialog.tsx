@@ -54,7 +54,13 @@ export function SendToCalendarDialog({
       .then((o) => {
         if (cancelled) return;
         setOptions(o);
-        setDate(o.today);
+        setDate(o.prefill?.date || o.today);
+        if (o.prefill) {
+          if (o.prefill.time) setTime(o.prefill.time);
+          if (o.prefill.title) setTitle(o.prefill.title);
+          if (o.prefill.text) setText(o.prefill.text);
+          if (o.prefill.kind) setKind(o.prefill.kind);
+        }
         if (o.posts.length > 0) {
           setPostId(o.posts.find((p) => p.date >= o.today)?.id ?? o.posts[0].id);
         }

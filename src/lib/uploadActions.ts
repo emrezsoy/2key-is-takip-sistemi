@@ -12,6 +12,7 @@ export type UploadAction =
   | "updateSharePost"
   | "reviseDelivery"
   | "teamReviseDelivery"
+  | "reviseTaskAnnotated"
   | "createProposal"
   | "addProposalFile"
   | "updateAvatar";

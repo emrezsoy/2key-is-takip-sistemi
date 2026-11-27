@@ -1,0 +1,14 @@
+# Sunucu Linux: tüm metin dosyaları depoda ve çalışma kopyasında LF kalsın
+* text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.mp3 binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+*.db binary

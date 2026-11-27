@@ -15,6 +15,7 @@ import { pushNotification } from "@/lib/inAppNotify";
 import { canManageClientJobs } from "@/lib/clientAccess";
 import { deleteUploadedFile } from "@/lib/storage";
 import { appendAdminRevision } from "@/lib/revisionNote";
+import { parseRevisionForm, revisionDetails } from "@/lib/revisionForm";
 import { notifyRequesterTaskDone } from "@/lib/clientNotify";
 import { DurationUnit, TaskStatus, Urgency } from "@prisma/client";
 import type { Role } from "@prisma/client";
@@ -264,16 +265,52 @@ export async function approveTask(taskId: string) {
     data: { status: "DONE", completedAt: new Date() },
   });
 
+  // İş içerik listesinden geldiyse teslim görselleri (ve caption) otomatik o satıra konur.
+  // Müşteriye henüz açılmaz (DRAFT); ekip içerik listesinde "Müşteriye gönder" deyince onaya düşer.
+  const delivered = await deliverToContentRow(taskId, task.caption, session.user.name ?? session.user.username ?? "Yönetici");
+
   await prisma.activity.create({
     data: {
       userId: session.user.id,
       taskId,
-      message: `"${task.title}" görevini onayladı`,
+      message: `"${task.title}" görevini onayladı${delivered ? ` — teslim "${delivered}" içerik satırına kondu (müşteriye henüz gönderilmedi)` : ""}`,
     },
   });
   await notifyRequesterTaskDone(taskId);
 
   revalidatePath("/");
+  if (delivered) revalidatePath("/musteriler/[id]/icerik", "page");
+}
+
+/** İşin bağlı olduğu içerik satırına teslim görsel/videolarını DRAFT olarak koyar. Satır ya da görsel yoksa null. */
+async function deliverToContentRow(taskId: string, caption: string | null, byName: string) {
+  const item = await prisma.contentItem.findFirst({ where: { taskId }, select: { id: true, title: true } });
+  if (!item) return null;
+  const subs = await prisma.taskSubmission.findMany({
+    where: { taskId },
+    orderBy: [{ position: "asc" }, { uploadedAt: "asc" }],
+    select: { fileUrl: true, fileName: true },
+  });
+  const media = subs.filter((x): x is { fileUrl: string; fileName: string } => !!x.fileUrl && x.fileUrl.startsWith("/api/files/") && MEDIA_NAME.test(x.fileName));
+  if (media.length === 0) return null;
+  await prisma.$transaction([
+    prisma.deliveryFile.deleteMany({ where: { contentItemId: item.id } }),
+    prisma.deliveryFile.createMany({
+      data: media.map((m, position) => ({ contentItemId: item.id, url: m.fileUrl, name: m.fileName, mediaType: VIDEO_NAME.test(m.fileName) ? "VIDEO" : "IMAGE", position })),
+    }),
+    prisma.contentItem.update({
+      where: { id: item.id },
+      data: {
+        deliveryStatus: "DRAFT",
+        deliveredAt: new Date(),
+        deliveredByName: byName,
+        reviewedAt: null,
+        reviewedByName: null,
+        ...(caption?.trim() ? { caption: caption.trim() } : {}),
+      },
+    }),
+  ]);
+  return item.title;
 }
 
 /** Yönetici revizesi: onay bekleyen, devam eden (teslim yüklenmiş) ya da tamamlanmış işe revize verir. İş "Devam ediyor"a döner, çalışana
@@ -284,6 +321,44 @@ export async function reviseTask(taskId: string, note: string) {
   if (!note.trim()) {
     throw new Error("Revize notu zorunludur.");
   }
+  return applyAdminRevision(session.user, taskId, { note: note.trim(), plain: note.trim(), files: [] });
+}
+
+const MEDIA_NAME = /\.(png|jpe?g|webp|gif|mp4|mov|webm|m4v)$/i;
+const VIDEO_NAME = /\.(mp4|mov|webm|m4v)$/i;
+
+/** İş kartından çizimli revize (müşteri revizesiyle aynı ekran): teslim görselleri üzerine çizim, etiket notları ve genel not.
+ * Çizimli görseller işin "revize dosyaları" olarak kartta görünür; iş "Devam ediyor"a döner. */
+export async function reviseTaskAnnotated(taskId: string, formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("Oturum bulunamadı.");
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      title: true, clientId: true, client: { select: { name: true } },
+      submissions: { orderBy: [{ position: "asc" }, { uploadedAt: "asc" }], select: { fileName: true, fileUrl: true } },
+    },
+  });
+  if (!task) throw new Error("Görev bulunamadı.");
+  // Editördeki görsel sırası = teslimdeki görsel/video dosyalarının sırası (ekranla aynı süzgeç).
+  const media = task.submissions.filter((x) => x.fileUrl && x.fileUrl.startsWith("/api/files/") && MEDIA_NAME.test(x.fileName));
+  const { note, annotations, renamed } = parseRevisionForm(formData, media.map((m) => ({ mediaType: VIDEO_NAME.test(m.fileName) ? "VIDEO" : "IMAGE" })));
+  const stored =
+    renamed.length > 0
+      ? await storeTaskAttachments(renamed, { client: { id: task.clientId, name: task.client?.name ?? "" }, taskTitle: task.title, uploadedById: session.user.id })
+      : [];
+  const body = revisionDetails("İş kartından revize", note, annotations, stored.length > 0);
+  const plain = [note, ...annotations.flatMap((a) => a.texts)].filter(Boolean).join(" · ").slice(0, 1000) || "Görsel üzerinde çizimli revize";
+  return applyAdminRevision(session.user, taskId, { note: body, plain, files: stored.map((f) => ({ url: f.url, name: f.name })) });
+}
+
+async function applyAdminRevision(
+  user: { id: string; role: Role; name?: string | null; username?: string | null },
+  taskId: string,
+  rev: { note: string; plain: string; files: { url: string; name: string }[] }
+) {
+  const note = rev.note;
+  const session = { user };
 
   const task = await prisma.task.findUnique({
     where: { id: taskId },
@@ -304,7 +379,7 @@ export async function reviseTask(taskId: string, note: string) {
 
   // Müşteri onayını bekleyen teslimler geri çekilir (müşteri hatalı işi onaylamasın); onaylanmış / revize istenmiş olanlara dokunulmaz.
   const [items, requests] = await Promise.all([
-    prisma.contentItem.findMany({ where: { taskId, deliveryStatus: "REVIEW" }, select: { id: true } }),
+    prisma.contentItem.findMany({ where: { taskId, deliveryStatus: { in: ["REVIEW", "DRAFT"] } }, select: { id: true } }),
     prisma.clientRequest.findMany({ where: { taskId, deliveryStatus: "REVIEW" }, select: { id: true } }),
   ]);
   const reset = { deliveryStatus: null, deliveredAt: null, deliveredByName: null, reviewedAt: null, reviewedByName: null };
@@ -315,9 +390,12 @@ export async function reviseTask(taskId: string, note: string) {
       where: { id: taskId },
       data: { status: "IN_PROGRESS", completedAt: null, revisionNote: appendAdminRevision(task.revisionNote, byName, note) },
     }),
-    prisma.taskRevision.create({ data: { taskId, source: "ADMIN", note: note.trim(), byId: session.user.id, byName } }),
+    prisma.taskRevision.create({ data: { taskId, source: "ADMIN", note: rev.plain, byId: session.user.id, byName } }),
     // Önceki revizenin çizimli dosyaları "eski revize" olur.
     prisma.taskRevisionFile.updateMany({ where: { taskId, archivedAt: null }, data: { archivedAt: new Date() } }),
+    ...(rev.files.length > 0
+      ? [prisma.taskRevisionFile.createMany({ data: rev.files.map((f, i) => ({ taskId, url: f.url, name: f.name, position: i })) })]
+      : []),
     ...(items.length > 0
       ? [
           prisma.deliveryFile.deleteMany({ where: { contentItemId: { in: items.map((i) => i.id) } } }),
@@ -334,7 +412,7 @@ export async function reviseTask(taskId: string, note: string) {
       data: {
         userId: session.user.id,
         taskId,
-        message: `"${task.title}" görevine yönetici revizesi verdi${wasDone ? " (tamamlanmış iş yeniden açıldı)" : ""}${withdrawn > 0 ? " — müşteriye gönderilen teslim geri çekildi" : ""}: ${note.trim()}`,
+        message: `"${task.title}" görevine yönetici revizesi verdi${wasDone ? " (tamamlanmış iş yeniden açıldı)" : ""}${withdrawn > 0 ? " — müşteriye gönderilen teslim geri çekildi" : ""}${rev.files.length > 0 ? ` (${rev.files.length} çizimli görsel)` : ""}: ${rev.plain}`,
       },
     }),
   ]);
@@ -345,7 +423,7 @@ export async function reviseTask(taskId: string, note: string) {
       taskId: task.id,
       type: "TASK_RETURNED",
       title: "Revize gerekiyor",
-      message: `"${task.title}" görevi için ${byName} revize verdi: ${note.trim()}`,
+      message: `"${task.title}" görevi için ${byName} revize verdi: ${rev.plain}`,
     });
     if (task.assignedTo.emailNotificationsEnabled) {
       await notifyTaskReturnedToProgress({
@@ -556,4 +634,22 @@ export async function replaceSubmissionFiles(taskId: string, formData: FormData)
   });
   revalidatePath("/");
   return { replaced: removed.length, added: extras.length };
+}
+
+
+/** İşin caption'ı (paylaşım metni): işi yapan çalışan, süpervizör / müşteri sorumlusu ve admin yazabilir. Boş bırakılabilir. */
+export async function setTaskCaption(taskId: string, caption: string) {
+  const session = await auth();
+  if (!session?.user) throw new Error("Oturum bulunamadı.");
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { clientId: true, assignedToId: true } });
+  if (!task) throw new Error("Görev bulunamadı.");
+  const allowed = task.assignedToId === session.user.id || (await canReviewTask(session.user, task));
+  if (!allowed) throw new Error("Bu işlem için yetkiniz yok.");
+  const text = caption.trim();
+  if (text.length > 2200) throw new Error("Caption en fazla 2200 karakter olabilir (Instagram sınırı).");
+  await prisma.task.update({ where: { id: taskId }, data: { caption: text || null } });
+  // İş bir içerik satırına bağlıysa satırdaki caption da güncellenir (müşteri onayında görünen metin).
+  if (text) await prisma.contentItem.updateMany({ where: { taskId }, data: { caption: text } });
+  revalidatePath("/");
+  revalidatePath("/musteriler/[id]/icerik", "page");
 }

@@ -46,6 +46,10 @@ export type CardTask = Pick<
   revisionFiles?: { id: string; url: string; name: string; old?: boolean }[];
   /** İş bir müşteri talebinden (ya da bir talebin revizesinden) geldi: teslim "Müşteri talebine gönder" ile iletilebilir. */
   requestSendable?: boolean;
+  /** Paylaşım metni (caption); içerik listesine teslimle birlikte gider. */
+  caption?: string | null;
+  /** İş içerik listesindeki bir satırdan açıldı: onaylanınca teslim otomatik o satıra gider, paylaşım takvimine gönderilmez. */
+  fromContent?: boolean;
 };
 
 type CardProps = {

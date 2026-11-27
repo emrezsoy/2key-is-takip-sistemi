@@ -274,6 +274,8 @@ export async function setClientShareColor(clientId: string, color: string | null
 
 export type SendTargetPost = { id: string; date: string; title: string | null; imageCount: number };
 export type SendOptions = {
+  /** İçerik satırından gönderirken satırdaki paylaşım tarihi/saati, başlık, caption ve tür hazır gelir. */
+  prefill?: { date?: string; time?: string; title?: string; text?: string; kind?: "POST" | "STORY" | "REEL" };
   clientId: string | null;
   clientName: string | null;
   /** İşin müşterisi yoksa seçilebilecek müşteriler. */
@@ -337,11 +339,26 @@ export async function getSendOptions(taskId: string): Promise<SendOptions> {
 export async function getItemSendOptions(itemId: string): Promise<SendOptions> {
   const item = await prisma.contentItem.findUnique({
     where: { id: itemId },
-    select: { clientId: true, client: { select: { name: true } } },
+    select: { clientId: true, client: { select: { name: true } }, title: true, caption: true, shareDate: true, shareTime: true, contentType: true },
   });
   if (!item) throw new Error("İçerik bulunamadı.");
   const { user } = await requireClientSender(item.clientId);
-  return buildSendOptions(user, item.clientId, item.client.name);
+  const opts = await buildSendOptions(user, item.clientId, item.client.name);
+  return {
+    ...opts,
+    prefill: {
+      date: item.shareDate ?? undefined,
+      time: item.shareTime ?? undefined,
+      title: item.title,
+      text: item.caption ?? undefined,
+      kind: contentKindToShareKind(item.contentType),
+    },
+  };
+}
+
+/** İçerik türü → paylaşım türü (story / reels; diğerleri gönderi). */
+function contentKindToShareKind(t: string | null): "POST" | "STORY" | "REEL" {
+  return t === "STORY" ? "STORY" : t === "REELS" ? "REEL" : "POST";
 }
 
 export type SendInput = {

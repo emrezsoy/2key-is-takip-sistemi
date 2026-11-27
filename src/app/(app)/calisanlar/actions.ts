@@ -73,6 +73,7 @@ export async function createEmployee(formData: FormData) {
       adManageAccess: role !== "ADMIN" && formData.get("adManageAccess") === "on",
       proposalAccess: formData.get("proposalAccess") === "on",
       contentAccess: role !== "ADMIN" && formData.get("contentAccess") === "on",
+      dmAccess: role !== "ADMIN" && formData.get("dmAccess") === "on",
       ...(role !== "ADMIN" && leadClientIds.length > 0
         ? { ledClients: { connect: leadClientIds.map((id) => ({ id })) } }
         : {}),
@@ -135,6 +136,7 @@ export async function updateEmployee(userId: string, formData: FormData) {
       adManageAccess: role !== "ADMIN" && formData.get("adManageAccess") === "on",
       proposalAccess: formData.get("proposalAccess") === "on",
       contentAccess: role !== "ADMIN" && formData.get("contentAccess") === "on",
+      dmAccess: role !== "ADMIN" && formData.get("dmAccess") === "on",
       ledClients: {
         set: role === "ADMIN" ? [] : leadClientIds.map((id) => ({ id })),
       },

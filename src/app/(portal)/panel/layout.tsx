@@ -33,7 +33,7 @@ export default async function PortalLayout({ children }: { children: React.React
 
   const client = await prisma.client.findUniqueOrThrow({
     where: { id: user.clientId },
-    select: { id: true, name: true, paymentDueDay: true, notifyMode: true, metaAdsManaged: true, googleAdsManaged: true },
+    select: { id: true, name: true, paymentDueDay: true, notifyMode: true, metaAdsManaged: true, googleAdsManaged: true, dmManaged: true },
   });
   const [notifications, unreadCount, payments, growthCount, reportCount] = await Promise.all([
     prisma.notification.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 15 }),
@@ -55,6 +55,8 @@ export default async function PortalLayout({ children }: { children: React.React
         overdue={payments.overdueCount > 0}
         growth={growthCount > 0}
         reports={reportCount > 0}
+        dm={client.dmManaged}
+        social={user.socialManaged}
       >
         {children}
       </PortalShell>
@@ -62,6 +64,7 @@ export default async function PortalLayout({ children }: { children: React.React
         autoStart={!user.tourDone}
         social={user.socialManaged}
         ads={client.metaAdsManaged || client.googleAdsManaged}
+        dm={client.dmManaged}
       />
       {client.notifyMode === "LOGIN_POPUP" && payments.overdueCount > 0 && user.tourDone && (
         <PaymentPopup amount={payments.overdueAmount} count={payments.overdueCount} />

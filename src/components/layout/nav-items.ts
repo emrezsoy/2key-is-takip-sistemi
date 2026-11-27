@@ -7,6 +7,7 @@ import {
   FileText,
   Home,
   Megaphone,
+  MessageCircle,
   Radio,
   TrendingUp,
   Settings,
@@ -72,6 +73,13 @@ export const PROPOSALS_NAV: NavItem = {
   icon: FileText,
 };
 
+/** Mesaj Otomasyonu (DM AI): admin her zaman, diğerleri Çalışanlar'daki yetkiyle. */
+export const DM_NAV: NavItem = {
+  href: "/mesaj-otomasyonu",
+  label: "Mesaj Otomasyonu",
+  icon: MessageCircle,
+};
+
 /** Ofis Radyosu: tüm ekip hesaplarında menünün sonunda. */
 export const RADIO_NAV: NavItem = {
   href: "/radyo",
@@ -80,7 +88,7 @@ export const RADIO_NAV: NavItem = {
 };
 
 /** Yetkiye bağlı menü öğeleri (Ana Sayfa'nın altında, bu sırayla). */
-export type NavAccess = { shareCalendar: boolean; adPanel: boolean; proposals?: boolean };
+export type NavAccess = { shareCalendar: boolean; adPanel: boolean; proposals?: boolean; dm?: boolean };
 
 /** Rolün menüsü; yetkisi olanlarda Paylaşım Takvimi ve Reklam Paneli Ana Sayfa'nın hemen altına eklenir. */
 export function navFor(role: Role, access: NavAccess): NavItem[] {
@@ -89,6 +97,7 @@ export function navFor(role: Role, access: NavAccess): NavItem[] {
     ...(access.shareCalendar ? [SHARE_CALENDAR_NAV] : []),
     ...(access.adPanel ? [AD_PANEL_NAV, SOCIAL_NAV] : []),
     ...(access.proposals ? [PROPOSALS_NAV] : []),
+    ...(access.dm ? [DM_NAV] : []),
   ];
   const radio = role === "CLIENT" ? [] : [RADIO_NAV];
   return [items[0], ...extras, ...items.slice(1), ...radio];

@@ -9,6 +9,7 @@ import { ShareEditProvider } from "@/components/share/ShareEditContext";
 import { canViewAdPanel } from "@/lib/adsAccess";
 import { getClientScope } from "@/lib/clientAccess";
 import { canUseProposals } from "@/lib/proposalAccess";
+import { canUseDm } from "@/lib/dm/access";
 import { SwRegister } from "@/components/portal/SwRegister";
 
 export default async function AppLayout({
@@ -20,7 +21,7 @@ export default async function AppLayout({
   if (!session?.user) redirect("/giris");
   if (session.user.role === "CLIENT") redirect("/panel");
 
-  const [me, notifications, unreadCount, shareAccess, adPanel, proposals, clientScope, pendingRequests] = await Promise.all([
+  const [me, notifications, unreadCount, shareAccess, adPanel, proposals, clientScope, pendingRequests, dm] = await Promise.all([
     prisma.user.findUnique({
       where: { id: session.user.id },
       select: { avatarUrl: true },
@@ -39,8 +40,9 @@ export default async function AppLayout({
     getClientScope(session.user),
     // Onay bekleyen müşteri talepleri ve revize istekleri (sadece yönetici görür).
     session.user.role === "ADMIN" ? prisma.clientRequest.count({ where: { status: "PENDING" } }) : Promise.resolve(0),
+    canUseDm(session.user),
   ]);
-  const navAccess = { shareCalendar: canViewShareCalendar(shareAccess), adPanel, proposals };
+  const navAccess = { shareCalendar: canViewShareCalendar(shareAccess), adPanel, proposals, dm };
   const navBadges: Record<string, number> = pendingRequests > 0 ? { "/talepler": pendingRequests } : {};
 
   return (

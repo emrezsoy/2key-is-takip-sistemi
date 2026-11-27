@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# canlı sunucuya özel (deploy.sh blue/green derleme klasörleri ve yedekler)
+/.next-a/
+/.next-b/
+/.active-dist
+*.bak-dm
 
 # vercel
 .vercel

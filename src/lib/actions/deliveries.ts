@@ -125,12 +125,14 @@ export async function sendTaskToContent(input: SendToContentInput) {
 
   const task = await prisma.task.findUnique({
     where: { id: input.taskId },
-    select: { title: true, clientId: true },
+    select: { title: true, clientId: true, caption: true },
   });
   if (!task) throw new Error("İş bulunamadı.");
   if (!task.clientId) throw new Error("Bu işin bir müşterisi yok.");
   const clientId = task.clientId;
   const actorName = user.name ?? user.username;
+  // İşin kartında yazılan caption satıra taşınır (boşsa satırdaki caption korunur).
+  const caption = task.caption?.trim() ? task.caption.trim() : undefined;
 
   let itemId: string;
   if (input.itemId) {
@@ -179,6 +181,7 @@ export async function sendTaskToContent(input: SendToContentInput) {
         deliveredByName: actorName,
         reviewedAt: null,
         reviewedByName: null,
+        ...(caption ? { caption } : {}),
       },
     }),
   ]);
@@ -249,6 +252,25 @@ export async function sendTaskToRequest(input: { taskId: string; fileUrls: strin
   });
   refresh();
   return { requestId: req.id, title: req.title, count: images.length };
+}
+
+/** Ekip: ekip içinde onaylanıp satıra konan (henüz müşteriye açılmamış) teslimi müşterinin onayına sunar. */
+export async function releaseDelivery(target: DeliveryTarget) {
+  if (target.type !== "item") throw new Error("Bu teslim zaten müşteride.");
+  const item = await prisma.contentItem.findUnique({ where: { id: target.id }, select: { clientId: true, title: true, year: true, month: true, deliveryStatus: true } });
+  if (!item) throw new Error("İçerik bulunamadı.");
+  const { user } = await requireClientSender(item.clientId);
+  if (item.deliveryStatus !== "DRAFT") throw new Error("Bu teslim zaten müşteriye gönderilmiş.");
+  await prisma.contentItem.update({
+    where: { id: target.id },
+    data: { deliveryStatus: "REVIEW", deliveredAt: new Date(), deliveredByName: user.name ?? user.username },
+  });
+  await notifyClientUsers(item.clientId, {
+    title: "Onayınızı bekleyen içerik",
+    message: `"${item.title}" içeriği hazır. İçerik panelinden onaylayabilir ya da revize isteyebilirsiniz.`,
+    url: `/panel/icerik?y=${item.year}&m=${item.month}`,
+  });
+  refresh();
 }
 
 /** Ekip: yanlış gönderilen teslimi "Tamamlanan" sütunundan kaldırır. */

@@ -8,6 +8,7 @@ import { ShareAccessField } from "./ShareAccessField";
 import { AdPanelField } from "./AdPanelField";
 import { ProposalAccessField } from "./ProposalAccessField";
 import { ContentAccessField } from "./ContentAccessField";
+import { DmAccessField } from "./DmAccessField";
 
 type Option = { id: string; label: string };
 
@@ -223,6 +224,7 @@ export function NewEmployeeModal({
             {role !== "ADMIN" && <AdPanelField />}
             <ProposalAccessField />
             {role !== "ADMIN" && <ContentAccessField />}
+            {role !== "ADMIN" && <DmAccessField />}
           </div>
 
           {error && <p className="mt-3 text-xs text-brand-600">{error}</p>}

@@ -12,6 +12,7 @@ import {
   ListChecks,
   LogOut,
   Megaphone,
+  MessageCircle,
   FileText,
   TrendingUp,
   Moon,
@@ -24,6 +25,7 @@ import {
 import { signOutAction } from "@/app/(app)/actions";
 import { useTheme } from "next-themes";
 import { NotificationsBell, type NotificationItem } from "@/components/layout/NotificationsBell";
+import { DmLaunch } from "@/components/dm/app/DmLaunch";
 
 type Item = { href: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }> };
 
@@ -36,6 +38,7 @@ const ITEMS: Item[] = [
   { href: "/panel/gelisim", label: "Gelişim", icon: TrendingUp },
   { href: "/panel/rapor", label: "Raporlar", icon: FileText },
   { href: "/panel/takvim", label: "Paylaşım Takvimi", icon: CalendarHeart },
+  { href: "/panel/mesajlar", label: "Mesajlar", icon: MessageCircle },
   { href: "/panel/odemeler", label: "Ödemeler", icon: Wallet },
   { href: "/panel/hesabim", label: "Hesabım", icon: UserCog },
 ];
@@ -51,8 +54,14 @@ export function PortalShell({
   overdue,
   growth = false,
   reports = false,
+  dm = false,
+  social = true,
   children,
 }: {
+  /** Mesaj Otomasyonu hizmeti var: telefonda "Mesajlar" ayrı uygulamayı (/mesaj) animasyonla açar. */
+  dm?: boolean;
+  /** Sosyal medya yönetimi hizmeti var mı (yoksa ve dm varsa alt menüde İçerik yerine Mesajlar). */
+  social?: boolean;
   clientName: string;
   fullName: string;
   notifications: NotificationItem[];
@@ -68,7 +77,13 @@ export function PortalShell({
   const { theme, setTheme } = useTheme();
   const [more, setMore] = useState(false);
   const items = ITEMS.filter((i) => (i.href !== "/panel/gelisim" || growth) && (i.href !== "/panel/rapor" || reports));
-  const bottom = items.slice(0, 4);
+  // Telefon menüsü: sadece mesaj otomasyonu alan müşteride "Mesajlar" alt menüde İçerik'in yerine geçer.
+  const mobile =
+    dm && !social
+      ? [...items.filter((i) => i.href !== "/panel/icerik" && i.href !== "/panel/mesajlar").slice(0, 3), items.find((i) => i.href === "/panel/mesajlar")!, ...items.filter((i) => i.href !== "/panel/mesajlar").slice(3)]
+      : items;
+  const bottom = mobile.slice(0, 4);
+  const dmLink = (href: string) => dm && href === "/panel/mesajlar";
 
   const badge = (href: string) =>
     href === "/panel/odemeler" && overdue ? (
@@ -146,6 +161,14 @@ export function PortalShell({
         {bottom.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item.href);
+          if (dmLink(item.href)) {
+            return (
+              <DmLaunch key={item.href} className="flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium text-(--color-text-muted)">
+                <Icon size={20} />
+                {item.label}
+              </DmLaunch>
+            );
+          }
           return (
             <Link
               key={item.href}
@@ -182,8 +205,16 @@ export function PortalShell({
               </button>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {items.slice(4).map((item) => {
+              {mobile.slice(4).map((item) => {
                 const Icon = item.icon;
+                if (dmLink(item.href)) {
+                  return (
+                    <DmLaunch key={item.href} className="relative flex flex-col items-center gap-1 rounded-xl border border-(--color-border) py-3 text-[11px] font-medium">
+                      <Icon size={20} />
+                      {item.label}
+                    </DmLaunch>
+                  );
+                }
                 return (
                   <Link
                     key={item.href}

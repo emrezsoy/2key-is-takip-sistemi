@@ -14,7 +14,7 @@ export async function pushNotification(params: {
 }) {
   const { userId, taskId, type, title, message, url } = params;
   await prisma.notification.create({
-    data: { userId, taskId, type, title, message },
+    data: { userId, taskId, type, title, message, url },
   });
   // Push gecikse/başarısız olsa da asıl işlemi bekletmesin.
   void sendPushToUser(userId, { title, body: message, url, tag: type });

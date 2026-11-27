@@ -104,3 +104,67 @@ async function unschedule(id: string) {
   refresh();
   return { legacy: post.metaStatus === null && post.metaScheduled };
 }
+
+export type BulkScheduleResult = { itemId: string; title: string; ok: boolean; message: string }[];
+
+/** İçerik listesinden "Meta'da toplu planla": seçilen, müşterinin onayladığı satırlar kayıtlı paylaşım gün/saatleriyle
+ * paylaşım takvimine eklenir ve Meta'da planlanır. Her satırın sonucu ayrı döner (biri hata verse diğerleri devam eder). */
+export async function bulkScheduleContentOnMeta(itemIds: string[]): Promise<BulkScheduleResult> {
+  const user = await requireEditor();
+  const ids = [...new Set(itemIds)].slice(0, 60);
+  const items = await prisma.contentItem.findMany({
+    where: { id: { in: ids } },
+    include: { client: { select: { name: true } }, deliveryFiles: { orderBy: { position: "asc" } } },
+  });
+  const out: BulkScheduleResult = [];
+  for (const item of items) {
+    try {
+      await assertClientInScope(user, item.clientId);
+      if (item.deliveryStatus !== "APPROVED") throw new Error("Müşteri henüz onaylamadı.");
+      if (!item.shareDate || !item.shareTime) throw new Error("Paylaşım tarihi ve saati girilmemiş.");
+      if (item.deliveryFiles.length === 0) throw new Error("Teslim görseli yok.");
+      if (!(await findSocialAccount(item.clientId))) {
+        throw new Error("Bu müşterinin Meta hesabı (Facebook sayfası / Instagram) sistemimize bağlı değil; otomatik planlanamaz.");
+      }
+      const kind = item.contentType === "STORY" ? "STORY" : item.contentType === "REELS" ? "REEL" : "POST";
+      // Aynı satır daha önce takvime gönderildiyse (aynı gün + başlık) o paylaşım kullanılır; yoksa yenisi açılır.
+      const existing = await prisma.sharePost.findFirst({
+        where: { clientId: item.clientId, date: item.shareDate, title: item.title.slice(0, 120), publishedAt: null },
+      });
+      const post =
+        existing ??
+        (await prisma.sharePost.create({
+          data: {
+            date: item.shareDate,
+            time: item.shareTime,
+            kind,
+            clientId: item.clientId,
+            clientName: item.client.name,
+            title: item.title.slice(0, 120),
+            text: item.caption?.trim() || null,
+            createdById: user.id,
+            images: {
+              create: item.deliveryFiles.map((f, position) => ({ url: f.url, name: f.name, position, mediaType: f.mediaType === "VIDEO" ? "VIDEO" : "IMAGE" })),
+            },
+          },
+        }));
+      if (existing && !(existing.metaStatus === "SCHEDULED" || existing.metaStatus === "PUBLISHING")) {
+        await prisma.sharePost.update({ where: { id: existing.id }, data: { time: item.shareTime, text: item.caption?.trim() || existing.text, kind } });
+      }
+      if (post.metaStatus === "SCHEDULED" || post.metaStatus === "PUBLISHING") {
+        out.push({ itemId: item.id, title: item.title, ok: true, message: "Zaten Meta'da planlı." });
+        continue;
+      }
+      try {
+        await schedule(post.id);
+      } catch (e) {
+        throw new Error(`Paylaşım takvimine eklendi ama Meta'da planlanamadı: ${e instanceof Error ? e.message : "bilinmeyen hata"}`);
+      }
+      out.push({ itemId: item.id, title: item.title, ok: true, message: `${item.shareDate} ${item.shareTime} için Meta'da planlandı.` });
+    } catch (e) {
+      out.push({ itemId: item.id, title: item.title, ok: false, message: e instanceof Error ? e.message : "Planlanamadı." });
+    }
+  }
+  refresh();
+  return out;
+}

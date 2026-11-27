@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Canlıda kesintisiz güncelleme: yeni sürüm ayrı klasörde (.next-a / .next-b) derlenir, çalışan sürüm
+  // o sırada eski klasörden hizmet vermeye devam eder; bitince uygulama yeni klasörle yeniden başlatılır (bkz. deploy.sh).
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Sunucuda derlerken tip kontrolü atlanır (tek çekirdek / sınırlı bellek; çalışan uygulamanın yanında bellek yetmiyor).
+  // Tip kontrolü canlıya göndermeden önce yerelde `npx tsc --noEmit` ile yapılır.
+  typescript: { ignoreBuildErrors: process.env.NEXT_SKIP_TYPECHECK === "1" },
   async headers() {
     return [
       {

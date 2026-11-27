@@ -139,3 +139,74 @@ dialog {
   main { overflow: visible !important; padding: 0 !important; }
   .print-wrap { max-width: none !important; }
 }
+
+/* ---------- Mesaj Otomasyonu: geçiş / açılış animasyonu (bkz. components/dm/app/DmIntro.tsx) ---------- */
+.dm-intro { position: fixed; inset: 0; z-index: 2147483647; overflow: hidden; pointer-events: auto; }
+.dm-intro__panel { position: absolute; background: #050505; will-change: transform; }
+.dm-intro__panel--t { left: 0; right: 0; top: 0; height: 50.5%; transform: translateY(-100%); animation: dmPanelIn 0.5s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
+.dm-intro__panel--b { left: 0; right: 0; bottom: 0; height: 50.5%; transform: translateY(100%); animation: dmPanelIn 0.5s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
+.dm-intro__panel--l { top: 0; bottom: 0; left: 0; width: 50.5%; transform: translateX(-100%); animation: dmPanelIn 0.5s 0.06s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
+.dm-intro__panel--r { top: 0; bottom: 0; right: 0; width: 50.5%; transform: translateX(100%); animation: dmPanelIn 0.5s 0.06s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
+.dm-intro__tint {
+  position: absolute; inset: 0; opacity: 0;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(255, 36, 36, 0.26), rgba(255, 36, 36, 0.07) 45%, transparent 72%),
+    linear-gradient(160deg, rgba(255, 36, 36, 0.12), transparent 42%, rgba(120, 0, 0, 0.2));
+  animation: dmFadeIn 0.6s 0.3s forwards;
+}
+.dm-intro__glow {
+  position: absolute; left: 50%; top: 50%; width: 60vmin; height: 60vmin; margin: -30vmin 0 0 -30vmin; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 43, 52, 0.55), rgba(255, 43, 52, 0) 65%);
+  filter: blur(28px); opacity: 0; transform: scale(0.4);
+  animation: dmGlow 1.6s 0.35s ease-out forwards;
+}
+.dm-intro__glow--2 { width: 95vmin; height: 95vmin; margin: -47.5vmin 0 0 -47.5vmin; background: radial-gradient(circle, rgba(255, 43, 52, 0.22), transparent 60%); animation-delay: 0.55s; }
+.dm-intro__logo { position: absolute; left: 50%; top: 50%; width: min(62vw, 280px); aspect-ratio: 1517 / 695; transform: translate(-50%, -50%); }
+.dm-intro__layer { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; user-select: none; }
+.dm-intro__mark { position: absolute; left: 0; top: 0; height: 100%; width: 45.35%; opacity: 0; user-select: none; animation: dmMark 0.65s 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+.dm-intro__letter { transform: translateY(16%); animation: dmLetter 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+.dm-intro--covered .dm-intro__panel { transform: none; animation: none; }
+.dm-intro--splash { animation: dmOut 0.5s 1.6s ease forwards; }
+.dm-intro--out { animation: dmOut 0.5s 0.15s ease forwards; }
+.dm-intro--out .dm-intro__panel { transform: none; animation: none; }
+.dm-intro--out .dm-intro__tint { opacity: 1; animation: none; }
+.dm-intro--out .dm-intro__glow { opacity: 0.55; transform: none; animation: none; }
+.dm-intro--out .dm-intro__mark { opacity: 1; animation: none; filter: drop-shadow(0 0 18px rgba(255, 43, 52, 0.55)); }
+.dm-intro--out .dm-intro__letter { opacity: 1; transform: none; animation: none; }
+@keyframes dmPanelIn { to { transform: none; } }
+@keyframes dmFadeIn { to { opacity: 1; } }
+@keyframes dmGlow { 0% { opacity: 0; transform: scale(0.4); } 45% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.55; transform: scale(1); } }
+@keyframes dmMark {
+  0% { opacity: 0; transform: scale(0.55) rotate(-6deg); }
+  60% { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: none; filter: drop-shadow(0 0 18px rgba(255, 43, 52, 0.55)); }
+}
+@keyframes dmLetter { to { opacity: 1; transform: none; } }
+@keyframes dmOut { to { opacity: 0; transform: scale(1.04); visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .dm-intro, .dm-intro * { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
+}
+
+/* Mesaj uygulaması: sohbet arka planı (WhatsApp benzeri desenli zemin) */
+.dm-chat-bg {
+  background-color: var(--color-bg);
+  background-image: radial-gradient(rgba(127, 127, 127, 0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.dark .dm-chat-bg { background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px), radial-gradient(ellipse at 50% 0%, rgba(255, 36, 36, 0.06), transparent 60%); background-size: 18px 18px, 100% 100%; }
+
+/* Gündüz modu açılış animasyonu (sistemin kendisi gündüz modunda açılır) */
+.dm-intro--light .dm-intro__panel { background: #f4f4f5; }
+.dm-intro--light .dm-intro__tint {
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(255, 36, 36, 0.12), rgba(255, 36, 36, 0.04) 45%, transparent 72%),
+    linear-gradient(160deg, rgba(255, 36, 36, 0.06), transparent 42%, rgba(255, 120, 120, 0.08));
+}
+.dm-intro--light .dm-intro__glow { background: radial-gradient(circle, rgba(255, 43, 52, 0.28), rgba(255, 43, 52, 0) 65%); }
+.dm-intro--light .dm-intro__glow--2 { background: radial-gradient(circle, rgba(255, 43, 52, 0.1), transparent 60%); }
+
+/* Açılış animasyonu karar verilene kadar ekranı kaplar (bkz. layout içindeki satır içi betik ve AppSplash) */
+html.splash-pending::before { content: ""; position: fixed; inset: 0; z-index: 2147483646; background: #f4f4f5; animation: splashFailsafe 0.3s 5s forwards; }
+/* Betik bir sebeple çalışmazsa örtü 5 sn sonra kendiliğinden kalkar. */
+@keyframes splashFailsafe { to { opacity: 0; visibility: hidden; } }
+html.splash-pending.splash-dark::before { background: #050505; }

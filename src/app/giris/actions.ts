@@ -33,7 +33,7 @@ export async function loginAction(
 
   const user = await prisma.user.findUnique({ where: { username }, select: { role: true } });
   const callback = safePath(String(formData.get("callbackUrl") ?? "/"));
-  const inPortal = callback === "/panel" || callback.startsWith("/panel/");
+  const inPortal = ["/panel", "/mesaj"].some((p) => callback === p || callback.startsWith(`${p}/`));
 
   // Müşteri hesapları müşteri paneline, ekip hesapları ekip paneline iner.
   const redirectTo = user?.role === "CLIENT" ? (inPortal ? callback : "/panel") : inPortal ? "/" : callback;

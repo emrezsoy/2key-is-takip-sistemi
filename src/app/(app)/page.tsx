@@ -9,7 +9,7 @@ import { defaultClientColor } from "@/components/share/palette";
 import { applyClientOrder } from "@/lib/clientOrder";
 import { creatorLabelOf, formatDate, ROLE_LABEL, URGENCY_RANK } from "@/lib/format";
 import { requestSendableOf } from "@/lib/deliveryUtil";
-import { loadClientApprovals } from "@/lib/taskApproval";
+import { loadClientApprovals, loadContentLinkedTasks } from "@/lib/taskApproval";
 import { getGreetingParts } from "@/lib/greeting";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { KanbanBoard, type BoardTask } from "@/components/dashboard/KanbanBoard";
@@ -162,10 +162,11 @@ async function loadBoardData(userId: string, isAdmin: boolean, ledClientIds: str
     prisma.user.findUnique({ where: { id: userId }, select: { clientOrder: true } }),
   ]);
   const colorOf = new Map(colorRows.map((c, i) => [c.id, c.shareColor ?? defaultClientColor(i)] as const));
-  const approvals = await loadClientApprovals(boardTasksRaw.map((t) => t.id));
+  const [approvals, fromContent] = await Promise.all([loadClientApprovals(boardTasksRaw.map((t) => t.id)), loadContentLinkedTasks(boardTasksRaw.map((t) => t.id))]);
 
   const jobs: BoardJob[] = boardTasksRaw.map((t) => ({
     clientApproval: approvals.get(t.id) ?? null,
+    fromContent: fromContent.has(t.id),
     id: t.id,
     title: t.title,
     description: t.description,
@@ -176,6 +177,7 @@ async function loadBoardData(userId: string, isAdmin: boolean, ledClientIds: str
     fileUrl: t.fileUrl,
     fileName: t.fileName,
     revisionNote: t.revisionNote,
+    caption: t.caption,
     submissions: t.submissions.map((s) => ({
       id: s.id,
       fileUrl: s.fileUrl,
@@ -262,9 +264,10 @@ async function EmployeeHome({ userId, name }: { userId: string; name: string }) 
     ledClientIds.length > 0 ? loadBoardData(userId, false, ledClientIds) : null,
   ]);
 
-  const approvals = await loadClientApprovals([...openRaw, ...doneRaw].map((t) => t.id));
+  const [approvals, fromContent] = await Promise.all([loadClientApprovals([...openRaw, ...doneRaw].map((t) => t.id)), loadContentLinkedTasks([...openRaw, ...doneRaw].map((t) => t.id))]);
   const toJob = (t: (typeof openRaw)[number]): EmployeeJob => ({
     clientApproval: approvals.get(t.id) ?? null,
+    fromContent: fromContent.has(t.id),
     id: t.id,
     title: t.title,
     description: t.description,
@@ -275,6 +278,7 @@ async function EmployeeHome({ userId, name }: { userId: string; name: string }) 
     fileUrl: t.fileUrl,
     fileName: t.fileName,
     revisionNote: t.revisionNote,
+    caption: t.caption,
     submissions: t.submissions.map((s) => ({
       id: s.id,
       fileUrl: s.fileUrl,
@@ -364,9 +368,10 @@ export default async function DashboardPage() {
     orderBy: { createdAt: "desc" },
   });
 
-  const taskApprovals = await loadClientApprovals(tasksRaw.map((t) => t.id));
+  const [taskApprovals, fromContent] = await Promise.all([loadClientApprovals(tasksRaw.map((t) => t.id)), loadContentLinkedTasks(tasksRaw.map((t) => t.id))]);
   const tasks: BoardTask[] = tasksRaw.map((t) => ({
     clientApproval: taskApprovals.get(t.id) ?? null,
+    fromContent: fromContent.has(t.id),
     id: t.id,
     title: t.title,
     description: t.description,
@@ -377,6 +382,7 @@ export default async function DashboardPage() {
     fileUrl: t.fileUrl,
     fileName: t.fileName,
     revisionNote: t.revisionNote,
+    caption: t.caption,
     submissions: t.submissions.map((s) => ({
       id: s.id,
       fileUrl: s.fileUrl,

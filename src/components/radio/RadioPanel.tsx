@@ -39,8 +39,6 @@ export function RadioPanel({
   current,
   queue,
   history,
-  skipVotes,
-  iVoted,
   controls,
   tvToken,
   limits,
@@ -49,11 +47,9 @@ export function RadioPanel({
   current: RadioTrackView | null;
   queue: RadioTrackView[];
   history: RadioTrackView[];
-  skipVotes: number;
-  iVoted: boolean;
   controls: { paused: boolean; volume: number; tvOnline: boolean };
   tvToken: string | null;
-  limits: { perUser: number; skipVotes: number };
+  limits: { perUser: number };
 }) {
   const [link, setLink] = useState("");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -72,8 +68,6 @@ export function RadioPanel({
       } else setNotice({ ok: false, text: r.error });
     });
   }
-
-  const canControl = (t: RadioTrackView) => me.isAdmin || t.addedById === me.id;
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -121,8 +115,8 @@ export function RadioPanel({
           </button>
         </div>
         <p className="mt-2 text-xs text-(--color-text-muted)">
-          Sırada en fazla {limits.perUser} şarkın olabilir ({myQueued}/{limits.perUser}). Çalan şarkıyı {limits.skipVotes} kişi
-          &quot;Geç&quot; derse atlanır.
+          Sırada en fazla {limits.perUser} şarkın olabilir ({myQueued}/{limits.perUser}). Çalan şarkıyı herkes geçebilir, sıradakileri
+          kaldırabilir.
         </p>
         {notice && (
           <div
@@ -157,59 +151,46 @@ export function RadioPanel({
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-stretch gap-2">
-              {canControl(current) ? (
-                <button
-                  disabled={pending}
-                  onClick={() => run(() => skipRadioTrack(current.id))}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-(--color-border) px-3 py-2 text-sm font-semibold hover:bg-(--color-surface-muted) disabled:opacity-60"
-                >
-                  <SkipForward size={16} />
-                  Geç
-                </button>
-              ) : (
-                <button
-                  disabled={pending || iVoted}
-                  onClick={() => run(() => skipRadioTrack(current.id))}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-(--color-border) px-3 py-2 text-sm font-semibold hover:bg-(--color-surface-muted) disabled:opacity-60"
-                >
-                  <SkipForward size={16} />
-                  {iVoted ? "Oy verdin" : "Geç"} ({skipVotes}/{limits.skipVotes})
-                </button>
-              )}
+              <button
+                disabled={pending}
+                onClick={() => run(() => skipRadioTrack(current.id))}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-(--color-border) px-3 py-2 text-sm font-semibold hover:bg-(--color-surface-muted) disabled:opacity-60"
+              >
+                <SkipForward size={16} />
+                Geç
+              </button>
             </div>
           </div>
         ) : (
           <p className="p-6 text-center text-sm text-(--color-text-muted)">Şu an çalan bir şarkı yok. İlk şarkıyı sen ekle!</p>
         )}
 
-        {me.isAdmin && (
-          <div className="flex flex-wrap items-center gap-4 border-t border-(--color-border) bg-(--color-surface-muted) px-4 py-3">
-            <button
-              disabled={pending}
-              onClick={() => run(() => setRadioPaused(!controls.paused))}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-            >
-              {controls.paused ? <Play size={16} /> : <Pause size={16} />}
-              {controls.paused ? "Devam ettir" : "Duraklat"}
-            </button>
-            <label className="flex min-w-48 flex-1 items-center gap-2 text-sm">
-              <Volume2 size={16} className="shrink-0 text-(--color-text-muted)" />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={volume}
-                onChange={(e) => setDragVolume(Number(e.target.value))}
-                onPointerUp={() => run(() => setRadioVolume(volume), () => setDragVolume(null))}
-                onKeyUp={() => run(() => setRadioVolume(volume), () => setDragVolume(null))}
-                className="w-full accent-brand-600"
-                aria-label="TV ses seviyesi"
-              />
-              <span className="w-10 text-right tabular-nums">{volume}</span>
-            </label>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-4 border-t border-(--color-border) bg-(--color-surface-muted) px-4 py-3">
+          <button
+            disabled={pending}
+            onClick={() => run(() => setRadioPaused(!controls.paused))}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            {controls.paused ? <Play size={16} /> : <Pause size={16} />}
+            {controls.paused ? "Devam ettir" : "Duraklat"}
+          </button>
+          <label className="flex min-w-48 flex-1 items-center gap-2 text-sm">
+            <Volume2 size={16} className="shrink-0 text-(--color-text-muted)" />
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={volume}
+              onChange={(e) => setDragVolume(Number(e.target.value))}
+              onPointerUp={() => run(() => setRadioVolume(volume), () => setDragVolume(null))}
+              onKeyUp={() => run(() => setRadioVolume(volume), () => setDragVolume(null))}
+              className="w-full accent-brand-600"
+              aria-label="TV ses seviyesi"
+            />
+            <span className="w-10 text-right tabular-nums">{volume}</span>
+          </label>
+        </div>
       </section>
 
       {/* Sıra */}
@@ -230,17 +211,15 @@ export function RadioPanel({
                   <p className="truncate text-sm font-medium">{t.title}</p>
                   <p className="truncate text-xs text-(--color-text-muted)">{t.addedByName}</p>
                 </div>
-                {canControl(t) && (
-                  <button
-                    disabled={pending}
-                    onClick={() => run(() => removeRadioTrack(t.id))}
-                    aria-label="Sıradan kaldır"
-                    title="Sıradan kaldır"
-                    className="rounded-md p-1.5 text-(--color-text-muted) hover:bg-(--color-surface-muted) hover:text-brand-600 disabled:opacity-60"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
+                <button
+                  disabled={pending}
+                  onClick={() => run(() => removeRadioTrack(t.id))}
+                  aria-label="Sıradan kaldır"
+                  title="Sıradan kaldır"
+                  className="rounded-md p-1.5 text-(--color-text-muted) hover:bg-(--color-surface-muted) hover:text-brand-600 disabled:opacity-60"
+                >
+                  <Trash2 size={16} />
+                </button>
               </li>
             ))}
           </ol>

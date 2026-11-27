@@ -13,7 +13,37 @@ const MAX_TITLE = 160;
 const MAX_TEXT = 6000;
 const MAX_DOC_BYTES = 300_000;
 
-export type ContentFields = { title: string; details: string; note: string; contentType?: string };
+export type ContentFields = {
+  title: string;
+  details: string;
+  note: string;
+  contentType?: string;
+  /** Sadece ekip: paylaşım metni ve planlanan paylaşım günü / saati. */
+  caption?: string;
+  shareDate?: string;
+  shareTime?: string;
+};
+
+/** Ekip alanları (caption, paylaşım tarihi/saati): müşteri hesabı değiştiremez. */
+function teamFields(input: ContentFields) {
+  const out: { caption?: string | null; shareDate?: string | null; shareTime?: string | null } = {};
+  if (input.caption !== undefined) {
+    const c = input.caption.trim();
+    if (c.length > 2200) throw new Error("Caption en fazla 2200 karakter olabilir (Instagram sınırı).");
+    out.caption = c || null;
+  }
+  if (input.shareDate !== undefined) {
+    const d = input.shareDate.trim();
+    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error("Geçersiz paylaşım tarihi.");
+    out.shareDate = d || null;
+  }
+  if (input.shareTime !== undefined) {
+    const t = input.shareTime.trim();
+    if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new Error("Geçersiz paylaşım saati.");
+    out.shareTime = t || null;
+  }
+  return out;
+}
 
 function clean(input: ContentFields) {
   const title = input.title.trim();
@@ -57,6 +87,7 @@ export async function createContentItem(clientId: string, year: number, month: n
       year,
       month,
       ...data,
+      ...(actor.isClient ? {} : teamFields(input)),
       position: (last._max.position ?? -1) + 1,
       createdById: actor.id,
       createdByName: actor.name,
@@ -71,7 +102,7 @@ export async function updateContentItem(id: string, input: ContentFields) {
   if (!item) throw new Error("Satır bulunamadı.");
   const actor = await requireContentActor(item.clientId);
   await assertNotLockedForClient(actor, item.taskId);
-  await prisma.contentItem.update({ where: { id }, data: clean(input) });
+  await prisma.contentItem.update({ where: { id }, data: { ...clean(input), ...(actor.isClient ? {} : teamFields(input)) } });
   refresh();
 }
 
