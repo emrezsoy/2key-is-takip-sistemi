@@ -55,6 +55,8 @@ export default async function ClientContentPage({
         months={months}
         canSendCalendar={canSend}
         canClearDelivery={canSend}
+        // Müşteri onayı olmayan müşteriler için: sadece admin (süpervizör / sorumlu değil).
+        canAdminApprove={session.user.role === "ADMIN"}
       />
     </div>
   );

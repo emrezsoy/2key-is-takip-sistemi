@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CalendarPlus, Check, Film, ImagePlus, ListPlus, Loader2, Lock, Plus, Trash2, X } from "lucide-react";
+import { CalendarPlus, Check, Film, ImagePlus, ListPlus, Loader2, Lock, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import {
   createContentItem,
   createJobFromContentItem,
@@ -17,6 +17,7 @@ import { FileDropZone } from "@/components/ui/FileDropZone";
 import { UploadBar } from "@/components/ui/UploadBar";
 import { uploadWithProgress, type UploadProgress } from "@/lib/useUploader";
 import { SendToCalendarDialog } from "@/components/share/SendToCalendarDialog";
+import { adminApproveItemToCalendar } from "@/lib/actions/sharePosts";
 
 export type ItemRow = {
   id: string;
@@ -94,6 +95,7 @@ export function ContentTable({
   canRevise = false,
   canSendCalendar = false,
   canClearDelivery = false,
+  canAdminApprove = false,
   clientView = false,
   briefHidden = false,
 }: {
@@ -112,6 +114,8 @@ export function ContentTable({
   canSendCalendar?: boolean;
   /** Ekip: yanlış gönderilen teslimi kaldırabilir. */
   canClearDelivery?: boolean;
+  /** Sadece admin: teslimi müşteri onayı beklemeden onaylayıp paylaşım takvimine ekleyebilir. */
+  canAdminApprove?: boolean;
   /** Müşteri paneli: iş olarak eklenmiş (işleme alınmış) satırlar artık değiştirilemez. */
   clientView?: boolean;
   /** İçeriğini bizim yazdığımız müşteri: içerik detayı, referans ve not sütunları gösterilmez; sadece hazır çalışma ve caption. */
@@ -310,6 +314,33 @@ export function ContentTable({
       patch(row.key, { busy: false, inJob: true });
     } catch (e) {
       patch(row.key, { busy: false, error: e instanceof Error ? e.message : "İş eklenemedi." });
+    }
+  };
+
+  // Admin onayıyla takvime ekle: müşteri onayı beklemeden "Onaylandı" yapar ve satırın gün/saatiyle paylaşım takvimine koyar.
+  const [adminNotes, setAdminNotes] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const adminApprove = async (row: Row) => {
+    if (!row.id || row.busy) return;
+    const dated = row.shareDate ? ` (${row.shareDate}${row.shareTime ? ` ${row.shareTime}` : ""})` : "";
+    if (!window.confirm(`"${row.title}" müşteri onayı beklenmeden onaylansın ve paylaşım takvimine eklensin mi?${dated}`)) return;
+    // Yazılmış ama henüz kaydedilmemiş tarih / saat / caption önce kaydedilir.
+    await commit(row);
+    patch(row.key, { busy: true, error: null });
+    const r = await adminApproveItemToCalendar(row.id);
+    patch(row.key, { busy: false });
+    if (!r.ok) {
+      setAdminNotes((cur) => ({ ...cur, [row.key]: { ok: false, text: r.error } }));
+      return;
+    }
+    if (r.placed) {
+      setAdminNotes((cur) => ({
+        ...cur,
+        [row.key]: { ok: true, text: r.placed!.existing ? `Onaylandı; takvimde ${r.placed!.date} günündeki paylaşım kullanıldı.` : `Onaylandı ve ${r.placed!.date} gününe takvime eklendi.` },
+      }));
+    } else {
+      // Paylaşım günü girilmemiş: onaylandı, günü seçmek için gönder penceresi açılır.
+      setAdminNotes((cur) => ({ ...cur, [row.key]: { ok: true, text: "Onaylandı. Paylaşım günü girilmediği için takvim penceresinden gün seçin." } }));
+      setCalendarItem({ itemId: row.id, files: (row.delivery?.files ?? []).map((f) => ({ url: f.url, name: f.name })) });
     }
   };
 
@@ -638,7 +669,18 @@ export function ContentTable({
                   reviewOnThumbClick
                   emptyText="Henüz tamamlanmadı"
                   extra={
-                    canSendCalendar && row.delivery?.status === "APPROVED" ? (
+                    canAdminApprove && (row.delivery?.status === "DRAFT" || row.delivery?.status === "REVIEW") ? (
+                      <button
+                        type="button"
+                        disabled={row.busy}
+                        onClick={() => void adminApprove(row)}
+                        title="Müşteri onayı beklemeden onayla (müşteri onaylamış gibi) ve satırdaki gün / saatle paylaşım takvimine ekle"
+                        className="flex items-center gap-1 rounded-lg border border-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                      >
+                        {row.busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                        Admin onayıyla takvime ekle
+                      </button>
+                    ) : canSendCalendar && row.delivery?.status === "APPROVED" ? (
                       <button
                         type="button"
                         onClick={() =>
@@ -655,6 +697,11 @@ export function ContentTable({
                     ) : undefined
                   }
                 />
+                {adminNotes[row.key] && (
+                  <p className={`mt-1 text-[11px] ${adminNotes[row.key].ok ? "text-emerald-600 dark:text-emerald-400" : "text-brand-600"}`}>
+                    {adminNotes[row.key].text}
+                  </p>
+                )}
               </div>
 
               {!briefHidden && <div className="hidden flex-col items-end gap-2 xl:flex">

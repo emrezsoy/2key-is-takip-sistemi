@@ -11,7 +11,7 @@ import { requireClientSender, requireSender } from "@/lib/sendAccess";
 import { assertClientInScope, getClientScope, inClientScope } from "@/lib/clientAccess";
 import type { SessionUser } from "@/lib/permissions";
 import { HEX_COLOR_RE } from "@/components/share/palette";
-import { parseShareKind, parseShareTime } from "@/lib/shareTime";
+import { parseShareKind, parseShareTime, SHARE_TIME_RE } from "@/lib/shareTime";
 import type { ShareKind, StoredFile } from "@prisma/client";
 
 /** Bir paylaşımdaki (kaydırmalı post) en fazla görsel sayısı. */
@@ -495,6 +495,83 @@ export async function sendItemToSharePost(input: ItemSendInput) {
     defaultTitle: item.title,
     images,
   });
+}
+
+export type AdminApproveResult =
+  | { ok: true; placed: { date: string; existing: boolean } | null }
+  | { ok: false; error: string };
+
+/** İçerik listesinde "Admin onayıyla takvime ekle" (sadece admin): müşteri onayı gerekmeyen müşterilerde teslim, müşteri
+ * onaylamış gibi "Onaylandı" olur ve satırdaki paylaşım günü / saati / caption / türüyle paylaşım takvimine eklenir.
+ * Satırda paylaşım günü yoksa sadece onaylanır (placed = null); ekran tarih seçmek için gönder penceresini açar.
+ * Aynı gün + başlıkla takvimde paylaşılmamış bir paylaşım varsa yenisi açılmaz (toplu Meta planlamasıyla aynı kural). */
+export async function adminApproveItemToCalendar(itemId: string): Promise<AdminApproveResult> {
+  try {
+    const session = await auth();
+    if (!session?.user || session.user.role !== "ADMIN") throw new Error("Bu işlemi sadece admin yapabilir.");
+    const user = session.user;
+    const item = await prisma.contentItem.findUnique({
+      where: { id: itemId },
+      include: { client: { select: { name: true } }, deliveryFiles: { orderBy: { position: "asc" } } },
+    });
+    if (!item) throw new Error("İçerik bulunamadı.");
+    if (!item.deliveryStatus || item.deliveryStatus === "REVISION") throw new Error("Bu satırda onaylanacak bir teslim yok.");
+    if (item.deliveryFiles.length === 0) throw new Error("Teslimde görsel yok.");
+
+    if (item.deliveryStatus !== "APPROVED") {
+      const byName = user.name ?? user.username ?? "Admin";
+      await prisma.contentItem.update({
+        where: { id: item.id },
+        data: { deliveryStatus: "APPROVED", reviewedAt: new Date(), reviewedByName: `${byName} (admin onayı)` },
+      });
+    }
+
+    let placed: { date: string; existing: boolean } | null = null;
+    if (item.shareDate && SHARE_DATE_RE.test(item.shareDate) && !Number.isNaN(Date.parse(item.shareDate))) {
+      const title = item.title.trim().slice(0, 120) || null;
+      const images = item.deliveryFiles.map((f, position) => ({
+        url: f.url,
+        name: f.name,
+        position,
+        mediaType: f.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
+      }));
+      const existing = await prisma.sharePost.findFirst({
+        where: { clientId: item.clientId, date: item.shareDate, title, publishedAt: null },
+        include: { _count: { select: { images: true } } },
+      });
+      if (existing) {
+        // Görselsiz eklenmiş bir taslak paylaşımsa teslim görselleri eklenir; Meta'da planlıysa dokunulmaz.
+        if (existing._count.images === 0 && existing.metaStatus !== "SCHEDULED" && existing.metaStatus !== "PUBLISHING") {
+          await prisma.sharePostImage.createMany({ data: images.map((i) => ({ ...i, postId: existing.id })) });
+        }
+        placed = { date: existing.date, existing: true };
+      } else {
+        await prisma.sharePost.create({
+          data: {
+            date: item.shareDate,
+            time: item.shareTime && SHARE_TIME_RE.test(item.shareTime) ? item.shareTime : null,
+            kind: contentKindToShareKind(item.contentType),
+            clientId: item.clientId,
+            clientName: item.client.name,
+            title,
+            text: item.caption?.split(String.fromCharCode(13)).join("").trim() || null,
+            createdById: user.id,
+            images: { create: images },
+          },
+        });
+        placed = { date: item.shareDate, existing: false };
+      }
+    }
+
+    revalidatePath("/paylasim-takvimi");
+    revalidatePath("/panel/takvim");
+    revalidatePath("/panel/icerik");
+    revalidatePath("/musteriler/[id]/icerik", "page");
+    revalidatePath("/");
+    return { ok: true, placed };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "İşlem yapılamadı." };
+  }
 }
 
 /** Takvimde bir paylaşımı sürükleyip başka güne bırakınca: sadece tarih değişir (saat, görseller, metin aynı kalır). */

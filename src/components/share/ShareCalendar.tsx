@@ -14,7 +14,9 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { AlertTriangle, CalendarClock, Check, ChevronLeft, ChevronRight, Clapperboard, Film, ImageIcon, Plus, Smartphone, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, ChevronLeft, ChevronRight, Clapperboard, Film, ImageIcon, ListChecks, Loader2, Plus, Smartphone, X } from "lucide-react";
+import { scheduleSharePostOnMeta } from "@/lib/actions/metaSchedule";
+import { metaScheduleProblems } from "@/lib/metaScheduleRules";
 import { compareShareTime, SHARE_KIND_LABEL } from "@/lib/shareTime";
 import { MONTHS } from "@/lib/format";
 import { textOn } from "./palette";
@@ -147,38 +149,61 @@ function DayListDialog({
   );
 }
 
-/** Takvimdeki paylaşım kutucuğu; düzenleyebilen kişi tutup başka güne sürükleyebilir. */
+/** Seçim modu: paylaşım Meta'da toplu planlamaya uygun mu? Uygun değilse nedeni (boş = uygun). */
+function bulkProblem(p: SharePostRow): string | null {
+  if (p.published) return "Zaten paylaşıldı olarak işaretli.";
+  if (p.metaStatus === "SCHEDULED" || p.metaStatus === "PUBLISHING") return "Zaten Meta'da planlı.";
+  if (p.metaStatus === "PUBLISHED" || p.metaStatus === "PARTIAL") return "Meta'da zaten yayınlandı.";
+  if (p.metaScheduled && !p.metaStatus) return "Meta Business'ta elle planlandı olarak işaretli.";
+  const problems = metaScheduleProblems({ kind: p.kind, date: p.date, time: p.time, text: p.text, images: p.images, metaAccess: p.metaAccess });
+  return problems.length > 0 ? problems.join(" ") : null;
+}
+
+/** Takvimdeki paylaşım kutucuğu; düzenleyebilen kişi tutup başka güne sürükleyebilir. Seçim modunda tıklamak seçer. */
 function PostChip({
   p,
   index,
   draggable,
   overlay = false,
   onOpen,
+  select,
 }: {
   p: SharePostRow;
   index: number;
   draggable: boolean;
   overlay?: boolean;
   onOpen?: () => void;
+  /** Seçim modu: tüm kutucuklar görünür, tıklamak seçer / bırakır. */
+  select?: { selected: boolean; problem: string | null };
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: p.id, disabled: !draggable || overlay });
-  const live = draggable && !overlay;
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: p.id, disabled: !draggable || overlay || !!select });
+  const live = draggable && !overlay && !select;
+  const visibility = overlay || select ? "flex" : index === 2 ? "hidden sm:flex" : index > 2 ? "hidden" : "flex";
+  const base = `${p.published ? "✓ Paylaşıldı · " : ""}${p.time ?? ""} ${p.clientName}${p.title ? ` — ${p.title}` : ""}`.trim();
   return (
     <button
       ref={overlay ? undefined : setNodeRef}
       {...(live ? listeners : {})}
       {...(live ? attributes : {})}
       type="button"
+      aria-pressed={select ? select.selected : undefined}
       onClick={(e) => {
         e.stopPropagation();
         onOpen?.();
       }}
-      title={`${p.published ? "✓ Paylaşıldı · " : ""}${p.time ?? ""} ${p.clientName}${p.title ? ` — ${p.title}` : ""}${live ? " (başka güne sürükleyebilirsin)" : ""}`.trim()}
+      title={select ? (select.problem ? `${base} — Seçilemez: ${select.problem}` : `${base} (seçmek için tıkla)`) : `${base}${live ? " (başka güne sürükleyebilirsin)" : ""}`}
       style={{ backgroundColor: p.color, color: textOn(p.color) }}
-      className={`${overlay ? "flex" : index === 2 ? "hidden sm:flex" : index > 2 ? "hidden" : "flex"} w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] font-semibold leading-tight sm:text-xs ${
+      className={`${visibility} w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] font-semibold leading-tight sm:text-xs ${
         p.published ? "opacity-40" : ""
-      } ${isDragging ? "opacity-30" : ""} ${live ? "cursor-grab active:cursor-grabbing" : ""}`}
+      } ${isDragging ? "opacity-30" : ""} ${live ? "cursor-grab active:cursor-grabbing" : ""} ${
+        select ? (select.selected ? "ring-2 ring-offset-1 ring-sky-500 ring-offset-(--color-surface)" : select.problem ? "opacity-35" : "") : ""
+      }`}
     >
+      {select && !select.problem && (
+        <span className={`flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border ${select.selected ? "border-white bg-sky-600" : "border-current"}`}>
+          {select.selected && <Check size={9} strokeWidth={4} className="text-white" />}
+        </span>
+      )}
       {p.published && <Check size={11} className="shrink-0" strokeWidth={3} />}
       {!p.published && p.metaScheduled && <CalendarClock size={10} className="shrink-0" />}
       {!p.published && p.metaStatus === "FAILED" && <AlertTriangle size={10} className="shrink-0" />}
@@ -253,6 +278,17 @@ export function ShareCalendar({
   const [dayList, setDayList] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  // Seçim modu (müşteri seçiliyken): paylaşımlar tıklanarak seçilir, sonra Meta'da toplu planlanır.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selectHint, setSelectHint] = useState<string | null>(null);
+  const [bulk, setBulk] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+    current: string | null;
+    results: { id: string; title: string; ok: boolean; message: string }[];
+  } | null>(null);
 
   // Sürükleyip bırakınca gün hemen değişmiş görünür; sunucu kaydedince asıl veri gelir.
   const [shownPosts, applyMove] = useOptimistic(posts, (cur, m: { id: string; date: string }) =>
@@ -311,7 +347,13 @@ export function ShareCalendar({
   const visiblePosts = activeFilter ? shownPosts.filter((p) => clientKey(p) === activeFilter) : shownPosts;
 
   const changeClientFilter = (value: string) => {
+    if (bulk?.running) return;
     setClientFilter(value);
+    // Müşteri değişince seçim sıfırlanır (seçim tek müşteri içindir).
+    setSelecting(false);
+    setSelected([]);
+    setBulk(null);
+    setSelectHint(null);
     // Adres çubuğunu güncelle (yenilemede/paylaşırken seçim korunur); sunucuya gitmeden.
     try {
       const url = new URL(window.location.href);
@@ -355,6 +397,66 @@ export function ShareCalendar({
   const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
   const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
   const isCurrent = today.startsWith(`${year}-${String(month).padStart(2, "0")}`);
+
+  // ---- Seçim modu ve Meta'da toplu planlama ----
+  const selectMode = selecting && dragEnabled && !!activeFilter;
+  const running = !!bulk?.running;
+  const postLabel = (p: SharePostRow) => `${formatShareDate(p.date)}${p.time ? ` ${p.time}` : ""} · ${p.title || p.clientName}`;
+  const inMonthDates = new Set(days.filter((d) => d.inMonth).map((d) => d.date));
+  const selectableInMonth = visiblePosts.filter((p) => inMonthDates.has(p.date) && !bulkProblem(p));
+  const toggleSelect = (p: SharePostRow) => {
+    if (running) return;
+    const problem = bulkProblem(p);
+    if (problem) {
+      setSelectHint(`${p.title || p.clientName}: ${problem}`);
+      return;
+    }
+    setSelectHint(null);
+    setSelected((cur) => (cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id]));
+  };
+  const startSelecting = () => {
+    setSelecting(true);
+    setSelected([]);
+    setBulk(null);
+    setSelectHint(null);
+    setMoveError(null);
+  };
+  const stopSelecting = () => {
+    if (running) return;
+    setSelecting(false);
+    setSelected([]);
+    setSelectHint(null);
+  };
+  const runBulk = async () => {
+    if (running) return;
+    const queue = shownPosts
+      .filter((p) => selected.includes(p.id))
+      .sort((a, b) => a.date.localeCompare(b.date) || compareShareTime(a.time, b.time));
+    if (queue.length === 0) return;
+    if (!window.confirm(`${queue.length} paylaşım, takvimdeki gün ve saatlerinde Meta'da (Instagram / Facebook) planlansın mı?`)) return;
+    setSelectHint(null);
+    const results: { id: string; title: string; ok: boolean; message: string }[] = [];
+    setBulk({ running: true, done: 0, total: queue.length, current: postLabel(queue[0]), results: [] });
+    // Tek tek planlanır: her biri Instagram'a önceden yüklenip doğrulandığı için birkaç saniye sürebilir; biri hata verse diğerleri devam eder.
+    for (const [i, p] of queue.entries()) {
+      setBulk((b) => (b ? { ...b, done: i, current: postLabel(p) } : b));
+      let message: string;
+      let ok: boolean;
+      try {
+        const r = await scheduleSharePostOnMeta(p.id);
+        ok = r.ok;
+        message = r.ok ? "Meta'da planlandı." : r.error;
+      } catch (e) {
+        ok = false;
+        message = e instanceof Error ? e.message : "Planlanamadı.";
+      }
+      results.push({ id: p.id, title: postLabel(p), ok, message });
+      setBulk((b) => (b ? { ...b, done: i + 1, results: [...results] } : b));
+    }
+    setBulk((b) => (b ? { ...b, running: false, current: null } : b));
+    // Planlananlar seçimden çıkar; hata verenler seçili kalır (düzeltip tekrar denemek için).
+    setSelected((cur) => cur.filter((id) => !results.some((x) => x.id === id && x.ok)));
+  };
 
   const openAdd = (date: string) => {
     setDayList(null);
@@ -425,6 +527,110 @@ export function ShareCalendar({
         </div>
       </div>
 
+      {dragEnabled && activeFilter && (
+        <div className="sticky top-0 z-10 space-y-2 rounded-xl border border-(--color-border) bg-(--color-surface) px-3 py-2 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            {!selectMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={startSelecting}
+                  className="flex items-center gap-1.5 rounded-lg border border-sky-500 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-900/20"
+                >
+                  <ListChecks size={14} />
+                  Seç
+                </button>
+                <span className="text-xs text-(--color-text-muted)">
+                  Paylaşımları seçip Meta&apos;da toplu planlamak için (elle paylaşacaklarını seçme).
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-xs font-semibold">{selected.length} seçili</span>
+                <button
+                  type="button"
+                  disabled={running || selectableInMonth.length === 0}
+                  onClick={() => {
+                    setSelectHint(null);
+                    setSelected(selectableInMonth.map((p) => p.id));
+                  }}
+                  className="rounded-lg border border-(--color-border) px-2.5 py-1.5 text-xs font-medium hover:bg-(--color-surface-muted) disabled:opacity-50"
+                >
+                  Planlanabilirlerin tümü ({selectableInMonth.length})
+                </button>
+                {selected.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={() => setSelected([])}
+                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-(--color-text-muted) hover:text-brand-600 disabled:opacity-50"
+                  >
+                    Seçimi temizle
+                  </button>
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={running || selected.length === 0}
+                    onClick={() => void runBulk()}
+                    className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {running ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+                    Meta&apos;da toplu planla{selected.length > 0 ? ` (${selected.length})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={stopSelecting}
+                    className="rounded-lg border border-(--color-border) px-2.5 py-1.5 text-xs font-medium hover:bg-(--color-surface-muted) disabled:opacity-50"
+                  >
+                    Seçimi kapat
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {selectMode && !bulk && !selectHint && (
+            <p className="text-[11px] text-(--color-text-muted)">
+              Takvimdeki paylaşımlara tıklayarak seç. Soluk görünenler planlanamaz (üzerine gelince nedeni görünür).
+            </p>
+          )}
+          {selectHint && <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">{selectHint}</p>}
+          {bulk && (
+            <div className="space-y-1.5">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-(--color-surface-muted)">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${bulk.running ? "bg-sky-500" : bulk.results.every((r) => r.ok) ? "bg-emerald-500" : "bg-amber-500"}`}
+                  style={{ width: `${Math.round((bulk.done / Math.max(bulk.total, 1)) * 100)}%` }}
+                />
+              </div>
+              {bulk.running ? (
+                <p className="flex items-center gap-1.5 text-xs text-(--color-text-muted)">
+                  <Loader2 size={12} className="animate-spin" />
+                  Planlanıyor {Math.min(bulk.done + 1, bulk.total)}/{bulk.total}: {bulk.current} — sayfayı kapatma.
+                </p>
+              ) : (
+                <p className="text-xs font-semibold">
+                  {bulk.results.filter((r) => r.ok).length}/{bulk.total} paylaşım Meta&apos;da planlandı
+                  {bulk.results.some((r) => !r.ok) ? `, ${bulk.results.filter((r) => !r.ok).length} tanesi planlanamadı (seçili bırakıldı).` : "."}
+                </p>
+              )}
+              {bulk.results.some((r) => !r.ok) && (
+                <ul className="space-y-0.5 text-[11px]">
+                  {bulk.results
+                    .filter((r) => !r.ok)
+                    .map((r) => (
+                      <li key={r.id} className="text-brand-600">
+                        {r.title}: {r.message}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {legend.length > 0 && (
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
           {legend.map((l) => (
@@ -470,11 +676,12 @@ export function ShareCalendar({
                 role={interactive ? "button" : undefined}
                 tabIndex={interactive ? 0 : undefined}
                 onClick={() => {
+                  if (selectMode) return;
                   if (canEdit) openAdd(date);
                   else if (dayPosts.length > 0) setDayList(date);
                 }}
                 onKeyDown={(e) => {
-                  if (!interactive || (e.key !== "Enter" && e.key !== " ")) return;
+                  if (selectMode || !interactive || (e.key !== "Enter" && e.key !== " ")) return;
                   e.preventDefault();
                   if (canEdit) openAdd(date);
                   else setDayList(date);
@@ -504,10 +711,21 @@ export function ShareCalendar({
                 </div>
 
                 <div className="space-y-0.5">
-                  {dayPosts.map((p, i) => (
-                    <PostChip key={p.id} p={p} index={i} draggable={dragEnabled} onOpen={() => setViewId(p.id)} />
-                  ))}
-                  {dayPosts.length > 2 && (
+                  {dayPosts.map((p, i) =>
+                    selectMode ? (
+                      <PostChip
+                        key={p.id}
+                        p={p}
+                        index={i}
+                        draggable={false}
+                        onOpen={() => toggleSelect(p)}
+                        select={{ selected: selected.includes(p.id), problem: bulkProblem(p) }}
+                      />
+                    ) : (
+                      <PostChip key={p.id} p={p} index={i} draggable={dragEnabled} onOpen={() => setViewId(p.id)} />
+                    )
+                  )}
+                  {!selectMode && dayPosts.length > 2 && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -519,7 +737,7 @@ export function ShareCalendar({
                       +{dayPosts.length - 2} daha
                     </button>
                   )}
-                  {dayPosts.length > 3 && (
+                  {!selectMode && dayPosts.length > 3 && (
                     <button
                       type="button"
                       onClick={(e) => {

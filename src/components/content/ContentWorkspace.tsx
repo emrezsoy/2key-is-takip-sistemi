@@ -23,6 +23,7 @@ export function ContentWorkspace({
   canRevise = false,
   canSendCalendar = false,
   canClearDelivery = false,
+  canAdminApprove = false,
   clientView = false,
   briefHidden = false,
 }: {
@@ -44,6 +45,8 @@ export function ContentWorkspace({
   /** Ekip: onaylanan teslimi paylaşım takvimine gönderebilir / yanlış teslimi kaldırabilir. */
   canSendCalendar?: boolean;
   canClearDelivery?: boolean;
+  /** Sadece admin: "Admin onayıyla takvime ekle". */
+  canAdminApprove?: boolean;
   /** Müşteri paneli: işleme alınan (iş olarak eklenen) satırlar kilitlenir. */
   clientView?: boolean;
   /** İçeriğini bizim yazdığımız müşteri: sadece hazır çalışma + caption; düz yazı sekmesi gösterilmez. */
@@ -143,6 +146,7 @@ export function ContentWorkspace({
           canRevise={canRevise}
           canSendCalendar={canSendCalendar}
           canClearDelivery={canClearDelivery}
+          canAdminApprove={canAdminApprove}
           clientView={clientView}
           briefHidden={briefHidden}
         />
